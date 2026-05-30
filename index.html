@@ -1208,7 +1208,10 @@ function renderMain(){
       '<div class="nav-wordmark">ROUNDUP</div><div style="width:34px"></div>',
       '<div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="setTab(\'inbox\')">🔔<div class="nav-dot"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div>'
     );
-    return body+tabs;
+    // Some bodies (e.g. renderEmpty) already include their own bottom tab bar.
+    // Only append tabs when the body doesn't already have one — prevents the
+    // double tab bar seen on empty screens like "No events yet".
+    return body.includes('class="bottom-tabs"') ? body : body+tabs;
   }
   return nav+`<div class="inner-scroll">${body}</div>`+tabs;
 }
@@ -6012,20 +6015,32 @@ function timeAgo(iso){
 }
 function initials(name){return (name||'?').trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();}
 
-// Load the shared feed from the database (newest first), with author info.
+// Load the shared feed from the database (newest first). We fetch reels first,
+// then look up author names in a second query. This avoids depending on a
+// database relationship link between reels and profiles (which, if missing,
+// would make the whole feed come back empty even when reels exist).
 async function loadReelsFromDB(){
   const db=window.ruDB; if(!db)return;
   state.reelsLoading=true;
   try{
     const {data,error}=await db
       .from('reels')
-      .select('id,caption,media_url,media_type,created_at,author_id,profiles(display_name,username,avatar_url)')
+      .select('id,caption,media_url,media_type,created_at,author_id')
       .order('created_at',{ascending:false})
       .limit(100);
     if(error)throw error;
-    state.dbReels=data||[];
+    let reels=data||[];
+    // Attach author info with a separate lookup (no embed needed).
+    const ids=[...new Set(reels.map(r=>r.author_id).filter(Boolean))];
+    let profMap={};
+    if(ids.length){
+      const pr=await db.from('profiles').select('id,display_name,username,avatar_url').in('id',ids);
+      (pr.data||[]).forEach(p=>{profMap[p.id]=p;});
+    }
+    state.dbReels=reels.map(r=>({...r,profiles:profMap[r.author_id]||null}));
   }catch(e){
     console.log('loadReels error:',e&&e.message);
+    alert('Could not load reels: '+(e&&e.message||e));
   }
   state.reelsLoading=false;
   if(state.currentTab==='reels')render();
@@ -6050,7 +6065,8 @@ async function submitReel(caption, file){
     if(ins.error)throw ins.error;
     await loadReelsFromDB();
   }catch(e){
-    alert('Could not post: '+(e&&e.message||e));
+    console.log('submitReel error:',e);
+    alert('Could not post: '+(e&&e.message||JSON.stringify(e)));
   }
 }
 
@@ -6072,12 +6088,19 @@ async function loadComments(reelId){
   try{
     const {data,error}=await db
       .from('reel_comments')
-      .select('id,body,created_at,author_id,profiles(display_name,username)')
+      .select('id,body,created_at,author_id')
       .eq('reel_id',reelId)
       .order('created_at',{ascending:true});
     if(error)throw error;
+    let rows=data||[];
+    const ids=[...new Set(rows.map(c=>c.author_id).filter(Boolean))];
+    let profMap={};
+    if(ids.length){
+      const pr=await db.from('profiles').select('id,display_name,username').in('id',ids);
+      (pr.data||[]).forEach(p=>{profMap[p.id]=p;});
+    }
     if(!state.dbComments)state.dbComments={};
-    state.dbComments[reelId]=data||[];
+    state.dbComments[reelId]=rows.map(c=>({...c,profiles:profMap[c.author_id]||null}));
     render();
   }catch(e){console.log('loadComments error:',e&&e.message);}
 }
