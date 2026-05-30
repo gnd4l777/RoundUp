@@ -742,7 +742,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 </div>
 
 <script>
-const STORAGE_KEY='roundup_v14';
+const STORAGE_KEY='roundup_v15';
 
 const DEFAULT_STATE={
   // ── Clean soft-launch starting state ──────────────────────────────────────
@@ -5993,56 +5993,197 @@ const REEL_TYPE_COLORS = {
   highlight: 'var(--red)', training: 'var(--green)', event_promo: 'var(--gold)', sponsor_promo: 'var(--blue)', lifestyle: 'var(--purple)'
 };
 
+/* ============================================================================
+   STAGE 2 — Reels backed by Supabase (shared across all users)
+   state.dbReels   = array of reels loaded from the database
+   state.dbComments= { reelId: [comments] } loaded on demand
+   state.openComments = reelId currently showing its comment box (or null)
+============================================================================ */
+state.dbReels = state.dbReels || [];
+state.dbComments = state.dbComments || {};
+state.reelsLoading = false;
+
+function timeAgo(iso){
+  const s=Math.floor((Date.now()-new Date(iso).getTime())/1000);
+  if(s<60)return 'just now';
+  if(s<3600)return Math.floor(s/60)+'m';
+  if(s<86400)return Math.floor(s/3600)+'h';
+  return Math.floor(s/86400)+'d';
+}
+function initials(name){return (name||'?').trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();}
+
+// Load the shared feed from the database (newest first), with author info.
+async function loadReelsFromDB(){
+  const db=window.ruDB; if(!db)return;
+  state.reelsLoading=true;
+  try{
+    const {data,error}=await db
+      .from('reels')
+      .select('id,caption,media_url,media_type,created_at,author_id,profiles(display_name,username,avatar_url)')
+      .order('created_at',{ascending:false})
+      .limit(100);
+    if(error)throw error;
+    state.dbReels=data||[];
+  }catch(e){
+    console.log('loadReels error:',e&&e.message);
+  }
+  state.reelsLoading=false;
+  if(state.currentTab==='reels')render();
+}
+
+// Post a new reel: optional photo upload to the 'reels' bucket, then DB insert.
+async function submitReel(caption, file){
+  const db=window.ruDB; if(!db){alert('Not connected.');return;}
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  let media_url=null, media_type=null;
+  try{
+    if(file){
+      const ext=(file.name.split('.').pop()||'jpg').toLowerCase();
+      const path=user.id+'/'+Date.now()+'.'+ext;
+      const up=await db.storage.from('reels').upload(path,file,{upsert:false});
+      if(up.error)throw up.error;
+      const pub=db.storage.from('reels').getPublicUrl(path);
+      media_url=pub.data.publicUrl; media_type='image';
+    }
+    const ins=await db.from('reels').insert({author_id:user.id,caption:caption,media_url:media_url,media_type:media_type});
+    if(ins.error)throw ins.error;
+    await loadReelsFromDB();
+  }catch(e){
+    alert('Could not post: '+(e&&e.message||e));
+  }
+}
+
+// Delete a reel (own, or any if admin — enforced by the DB policy too).
+async function deleteReelDB(id){
+  const db=window.ruDB; if(!db)return;
+  const isAdmin=document.getElementById('app').classList.contains('admin-unlocked');
+  if(!confirm(isAdmin?'Delete this reel? (admin/moderator action)':'Delete this reel?'))return;
+  try{
+    const {error}=await db.from('reels').delete().eq('id',id);
+    if(error)throw error;
+    await loadReelsFromDB();
+  }catch(e){alert('Could not delete: '+(e&&e.message||e));}
+}
+
+// Comments
+async function loadComments(reelId){
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {data,error}=await db
+      .from('reel_comments')
+      .select('id,body,created_at,author_id,profiles(display_name,username)')
+      .eq('reel_id',reelId)
+      .order('created_at',{ascending:true});
+    if(error)throw error;
+    if(!state.dbComments)state.dbComments={};
+    state.dbComments[reelId]=data||[];
+    render();
+  }catch(e){console.log('loadComments error:',e&&e.message);}
+}
+function toggleComments(reelId){
+  if(!state.dbComments)state.dbComments={};
+  state.openComments = (state.openComments===reelId)? null : reelId;
+  render();
+  if(state.openComments===reelId)loadComments(reelId);
+}
+async function submitComment(reelId){
+  const db=window.ruDB; if(!db)return;
+  const input=document.getElementById('cmt_'+reelId);
+  if(!input)return;
+  const body=input.value.trim();
+  if(!body)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  try{
+    const {error}=await db.from('reel_comments').insert({reel_id:reelId,author_id:user.id,body:body});
+    if(error)throw error;
+    input.value='';
+    await loadComments(reelId);
+  }catch(e){alert('Could not comment: '+(e&&e.message||e));}
+}
+async function deleteComment(reelId,commentId){
+  const db=window.ruDB; if(!db)return;
+  if(!confirm('Delete this comment?'))return;
+  try{
+    const {error}=await db.from('reel_comments').delete().eq('id',commentId);
+    if(error)throw error;
+    await loadComments(reelId);
+  }catch(e){alert('Could not delete: '+(e&&e.message||e));}
+}
+
 function renderReelsFeed(role){
-  const isFan = !hasAnyCredential(ROLE_PROFILES[role]?.userId);
-  const myId = ROLE_PROFILES[role]?.userId;
-  const reels = [...SAMPLE_REELS, ...(state.myReels||[])];
+  const isAdmin=document.getElementById('app').classList.contains('admin-unlocked');
+  const myId=window.ruUserId||null;
+
+  // Kick off a load if we haven't yet this session (not persisted in state).
+  if(!window._reelsLoaded){ window._reelsLoaded=true; setTimeout(loadReelsFromDB,0); }
+
+  if(!state.dbReels)state.dbReels=[];
+  if(!state.dbComments)state.dbComments={};
+  const reels=state.dbReels||[];
+
+  const feed = state.reelsLoading && reels.length===0
+    ? `<div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading reels…</div></div>`
+    : reels.length===0
+      ? `<div class="empty" style="padding:50px 20px"><div class="empty-icon">🎬</div><div class="empty-title">No reels yet</div><div class="empty-text">Be the first — tap + Post to share something.</div></div>`
+      : reels.map(r=>{
+          const prof=r.profiles||{};
+          const name=prof.display_name||prof.username||'Creator';
+          const canDelete = isAdmin || (myId && r.author_id===myId);
+          const comments=state.dbComments[r.id]||[];
+          const showComments=state.openComments===r.id;
+          return `
+          <div style="background:var(--dark2);border-bottom:1px solid var(--dark3);padding:14px 18px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+              <div style="width:38px;height:38px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:14px;flex-shrink:0">${initials(name)}</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:600;color:var(--white)">${name}</div>
+                <div style="font-size:10px;color:var(--mid)">${timeAgo(r.created_at)}</div>
+              </div>
+              ${canDelete?`<button onclick="deleteReelDB('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:11px;color:var(--mid);font-family:'DM Sans',sans-serif">🗑 Delete</button>`:''}
+            </div>
+            ${r.media_url?`<img src="${r.media_url}" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block" loading="lazy">`:''}
+            ${r.caption?`<div style="font-size:13px;color:var(--lighter);line-height:1.5;margin-bottom:10px">${escapeHtml(r.caption)}</div>`:''}
+            <div style="display:flex;gap:16px;align-items:center">
+              <button onclick="toggleComments('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:var(--light);font-family:'DM Sans',sans-serif">💬 Comments${comments.length?(' ('+comments.length+')'):''}</button>
+            </div>
+            ${showComments?`
+              <div style="margin-top:12px;border-top:1px solid var(--dark3);padding-top:12px">
+                ${comments.map(c=>{
+                  const cn=(c.profiles&&(c.profiles.display_name||c.profiles.username))||'Creator';
+                  const canDelC = isAdmin || (myId && c.author_id===myId);
+                  return `<div style="display:flex;gap:8px;margin-bottom:10px">
+                    <div style="width:26px;height:26px;border-radius:50%;background:var(--dark4);color:var(--lighter);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">${initials(cn)}</div>
+                    <div style="flex:1;min-width:0">
+                      <span style="font-size:12px;font-weight:600;color:var(--white)">${cn}</span>
+                      <span style="font-size:10px;color:var(--mid);margin-left:6px">${timeAgo(c.created_at)}</span>
+                      <div style="font-size:12px;color:var(--lighter);line-height:1.4">${escapeHtml(c.body)}</div>
+                    </div>
+                    ${canDelC?`<button onclick="deleteComment('${r.id}','${c.id}')" style="background:transparent;border:none;cursor:pointer;font-size:10px;color:var(--mid)">✕</button>`:''}
+                  </div>`;
+                }).join('')||'<div style="font-size:11px;color:var(--mid);margin-bottom:10px">No comments yet. Say something.</div>'}
+                <div style="display:flex;gap:8px">
+                  <input id="cmt_${r.id}" placeholder="Add a comment…" style="flex:1;background:var(--dark);border:1px solid var(--dark3);border-radius:18px;padding:8px 14px;color:var(--white);font-size:12px;font-family:'DM Sans',sans-serif" onkeydown="if(event.key==='Enter')submitComment('${r.id}')">
+                  <button onclick="submitComment('${r.id}')" style="background:var(--red);color:#fff;border:none;border-radius:18px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Send</button>
+                </div>
+              </div>`:''}
+          </div>`;
+        }).join('');
 
   return `
-    <div style="background:var(--dark);position:sticky;top:0;z-index:10;border-bottom:1px solid var(--dark3);padding:10px 18px;display:flex;justify-content:space-between;align-items:center">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:var(--white)">Reels</div>
-      <button onclick="openPostReel()" style="background:var(--red);color:#fff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:14px;border:none;cursor:pointer;font-family:'DM Sans',sans-serif">+ Post</button>
-    </div>
-    ${reels.map(r=>{
-      const u=state.users[r.userId];
-      if(!u)return '';
-      const typeColor=REEL_TYPE_COLORS[r.type]||'var(--light)';
-      const typeIcon=REEL_TYPE_ICONS[r.type]||'📱';
-      const liked=(state.reelLikes||{})[r.id];
-      return `
-        <div style="background:var(--dark2);border-bottom:1px solid var(--dark3);padding:14px 18px">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-            <div style="width:38px;height:38px;border-radius:50%;background:${avatarBg(u.color)};color:${avatarColor(u.color)};display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:14px;flex-shrink:0;cursor:pointer" onclick="openUserProfile('${u.id}')">${u.avatar}</div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600;color:var(--white);cursor:pointer" onclick="openUserProfile('${u.id}')">${u.name}</div>
-              <div style="font-size:10px;color:var(--mid)">${u.subRole||u.role} · ${r.time} ago</div>
-            </div>
-            <div style="font-size:10px;font-weight:600;padding:3px 9px;border-radius:10px;background:rgba(0,0,0,.2);color:${typeColor}">${typeIcon} ${r.type.replace('_',' ')}</div>
-          </div>
-          <!-- Video placeholder -->
-          <div style="background:linear-gradient(135deg,var(--dark3),var(--dark4));border-radius:var(--r);height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;margin-bottom:10px" onclick="playReel('${r.id}')">
-            <div style="position:absolute;inset:0;background:linear-gradient(135deg,rgba(232,37,26,.08),transparent)"></div>
-            <div style="font-size:40px;margin-bottom:8px;position:relative;z-index:1">▶</div>
-            <div style="font-size:13px;font-weight:600;color:var(--white);position:relative;z-index:1;text-align:center;padding:0 20px">${r.title}</div>
-            <div style="position:absolute;bottom:10px;right:12px;font-size:10px;color:var(--light);background:rgba(0,0,0,.5);padding:2px 7px;border-radius:8px">${(r.views/1000).toFixed(1)}K views</div>
-          </div>
-          <div style="font-size:13px;color:var(--lighter);line-height:1.5;margin-bottom:8px">${r.caption}</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-            ${r.tags.map(t=>`<span style="font-size:10px;color:var(--red);cursor:pointer">#${t}</span>`).join('')}
-          </div>
-          <div style="display:flex;gap:16px;align-items:center">
-            <button onclick="likeReel('${r.id}')" style="background:transparent;border:none;cursor:pointer;display:flex;align-items:center;gap:5px;font-size:12px;color:${liked?'var(--red)':'var(--light)'};font-family:'DM Sans',sans-serif">
-              ${liked?'❤️':'🤍'} ${r.likes+(liked?1:0)}
-            </button>
-            <button onclick="shareReel('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:var(--light);font-family:'DM Sans',sans-serif">↗ Share</button>
-            ${(!isFan&&myId===r.userId)||document.getElementById('app').classList.contains('admin-unlocked')?`<button onclick="deleteReel('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:11px;color:var(--mid);font-family:'DM Sans',sans-serif;margin-left:auto">🗑 Delete</button>`:''}
-          </div>
-        </div>
-      `;
-    }).join('')}
-    <div style="height:20px"></div>
-  `;
+    <div class="nav-bar"><div class="nav-wordmark">ROUNDUP</div><div style="width:34px"></div></div>
+    <div class="inner-scroll">
+      <div style="background:var(--dark);position:sticky;top:0;z-index:10;border-bottom:1px solid var(--dark3);padding:10px 18px;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:var(--white)">Reels</div>
+        <button onclick="openPostReel()" style="background:var(--red);color:#fff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:14px;border:none;cursor:pointer;font-family:'DM Sans',sans-serif">+ Post</button>
+      </div>
+      ${feed}
+      <div style="height:20px"></div>
+    </div>`;
 }
+
+function escapeHtml(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 function playReel(rid){
   const r=SAMPLE_REELS.find(x=>x.id===rid)||(state.myReels||[]).find(x=>x.id===rid);
@@ -6050,29 +6191,40 @@ function playReel(rid){
   alert('Playing: '+r.title+' -- Short-form video, up to 60 seconds.');
 }
 
-// Post a new reel. Soft-launch version: creates a text/caption reel saved on
-// THIS device. (Stage 2 will save it to Supabase so everyone sees it + supports
-// image/video upload.)
+// Post a new reel — opens a modal with caption + optional photo. Saves to
+// Supabase so the reel appears in everyone's shared feed.
 function openPostReel(){
-  const caption=prompt('What do you want to post? (caption)');
-  if(caption===null)return;
-  const trimmed=caption.trim();
-  if(!trimmed){alert('Add a caption to post.');return;}
-  const title=prompt('Short title for your reel (optional):')||'Reel';
-  const myId=ROLE_PROFILES[state.currentRole]?.userId||'me';
-  if(!state.myReels)state.myReels=[];
-  state.myReels.unshift({
-    id:'reel_'+Date.now(),
-    userId:myId,
-    type:'highlight',
-    title:title.trim()||'Reel',
-    caption:trimmed,
-    likes:0,
-    views:0,
-    time:'now',
-    tags:[]
-  });
-  saveState();
+  let m=document.getElementById('ruPostReel');
+  if(!m){
+    m=document.createElement('div');
+    m.id='ruPostReel';m.className='modal-bg';
+    m.onclick=function(e){if(e.target===m)closePostReel();};
+    document.body.appendChild(m);
+  }
+  m.innerHTML=`
+    <div class="modal" style="text-align:left">
+      <div class="modal-handle"></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white);margin-bottom:14px">New Reel</div>
+      <textarea id="reelCaption" placeholder="Write a caption…" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:12px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;min-height:90px;resize:vertical;box-sizing:border-box"></textarea>
+      <label style="display:block;margin-top:12px;font-size:12px;color:var(--mid)">Photo (optional)</label>
+      <input id="reelFile" type="file" accept="image/*" style="margin-top:6px;color:var(--lighter);font-size:12px;width:100%">
+      <div id="reelPostMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
+      <button id="reelPostBtn" onclick="doPostReel()" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">Post Reel</button>
+      <button onclick="closePostReel()" style="width:100%;background:transparent;color:var(--mid);border:none;padding:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:4px">Cancel</button>
+    </div>`;
+  m.style.display='flex';
+}
+function closePostReel(){const m=document.getElementById('ruPostReel');if(m)m.style.display='none';}
+async function doPostReel(){
+  const cap=document.getElementById('reelCaption').value.trim();
+  const fileInput=document.getElementById('reelFile');
+  const file=fileInput&&fileInput.files&&fileInput.files[0];
+  const msg=document.getElementById('reelPostMsg');
+  const btn=document.getElementById('reelPostBtn');
+  if(!cap&&!file){msg.textContent='Add a caption or a photo to post.';return;}
+  btn.disabled=true;btn.textContent='Posting…';msg.textContent='';
+  await submitReel(cap,file);
+  closePostReel();
   state.currentTab='reels';
   render();
 }
@@ -7003,7 +7155,7 @@ function attachHandlers(){
     b.onclick=()=>{state.currentRole=b.dataset.role;state.currentScreen='main';state.drilldown=null;state.currentTab=ROLE_PROFILES[b.dataset.role].tabs[0];saveState();render();};
   });
 }
-function setTab(t){state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();}
+function setTab(t){state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();}
 function openConv(id){if(state.currentRole==='fan')return;state.currentScreen='conversation';state.drilldown=id;saveState();render();setTimeout(()=>{const c=document.getElementById('msgsContainer');if(c)c.scrollTop=c.scrollHeight;},50);}
 function openConversation(pid){
   // No hard block on openConv — canMessageUser handles per-conversation permission
@@ -7179,6 +7331,7 @@ render();
   db.auth.getUser().then(function(res){
     if(res.data&&res.data.user){
       window.ruEmail=res.data.user.email;
+      window.ruUserId=res.data.user.id;
       var meta=res.data.user.user_metadata||{};
       window.ruName=meta.display_name||meta.username||'';
       window.ruUsername=meta.username||'';
