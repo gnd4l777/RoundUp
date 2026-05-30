@@ -742,7 +742,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 </div>
 
 <script>
-const STORAGE_KEY='roundup_v13';
+const STORAGE_KEY='roundup_v14';
 
 const DEFAULT_STATE={
   // ── Clean soft-launch starting state ──────────────────────────────────────
@@ -1196,6 +1196,20 @@ function renderMain(){
 
   const nav=`<div class="nav-bar"><div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="setTab('inbox')">🔔<div class="nav-dot"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div></div>`;
   const tabs=`<div class="bottom-tabs">`+profile.tabs.map(t=>`<button class="btab ${tab===t?'active':''}" onclick="setTab('${t}')">${ICONS[t]||ICONS.home}${TAB_LABELS[t]}</button>`).join('')+`</div>`;
+  // Some screen functions already include their OWN nav-bar + inner-scroll
+  // (e.g. profile, reels). For those, don't double-wrap — just add the account
+  // icons into their bare header and append the bottom tabs. For screens that
+  // don't (e.g. home), wrap them normally.
+  const bodyHasOwnNav = body.trimStart().startsWith('<div class="nav-bar"');
+  if(bodyHasOwnNav){
+    // Inject the bell + account icons into the screen's own bare ROUNDUP header
+    // (only if it doesn't already have action icons).
+    body = body.replace(
+      '<div class="nav-wordmark">ROUNDUP</div><div style="width:34px"></div>',
+      '<div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="setTab(\'inbox\')">🔔<div class="nav-dot"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div>'
+    );
+    return body+tabs;
+  }
   return nav+`<div class="inner-scroll">${body}</div>`+tabs;
 }
 
@@ -2692,17 +2706,10 @@ function renderCreatorProfile(){
         Verify your credentials to unlock additional features. Everyone on RoundUp is a creator by default — credentials expand what you can do.
       </div>
 
-      ${me?.creatorAgreementSigned
-        ?`<div style="background:rgba(29,184,122,.06);border:1px solid rgba(29,184,122,.15);border-radius:var(--r);margin:0 18px 10px;padding:9px 14px;display:flex;align-items:center;gap:8px">
-            <span style="color:var(--green)">✓</span>
-            <span style="font-size:11px;color:var(--green);font-weight:600">Creator Account Agreement signed</span>
-            <button onclick="openRevenueReport('${myId||'mw'}')" style="margin-left:auto;background:transparent;border:1px solid rgba(29,184,122,.3);color:var(--green);padding:4px 10px;border-radius:8px;font-size:10px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">📊 Revenue Report</button>
-          </div>`
-        :`<div style="background:rgba(232,37,26,.06);border:1px solid rgba(232,37,26,.2);border-radius:var(--r);margin:0 18px 10px;padding:11px 14px">
-            <div style="font-size:12px;font-weight:600;color:var(--red);margin-bottom:4px">Sign Creator Account Agreement first</div>
-            <div style="font-size:11px;color:var(--mid);margin-bottom:8px;line-height:1.5">Required before unlocking any paid features.</div>
-            <button onclick="openCreatorAccountAgreement('${myId||'mw'}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:9px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Review &amp; Sign →</button>
-          </div>`}
+      <div style="background:rgba(29,184,122,.06);border:1px solid rgba(29,184,122,.15);border-radius:var(--r);margin:0 18px 10px;padding:11px 14px">
+        <div style="font-size:12px;font-weight:600;color:var(--green);margin-bottom:4px">✓ You're a Creator — post and grow freely</div>
+        <div style="font-size:11px;color:var(--mid);line-height:1.5">Post reels, follow fighters and gyms, and build your following right now. Paid features (subscriptions &amp; earnings) open once platform licensing is complete.</div>
+      </div>
 
       <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
         ${[
@@ -5994,7 +6001,7 @@ function renderReelsFeed(role){
   return `
     <div style="background:var(--dark);position:sticky;top:0;z-index:10;border-bottom:1px solid var(--dark3);padding:10px 18px;display:flex;justify-content:space-between;align-items:center">
       <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:var(--white)">Reels</div>
-      ${!isFan?`<button onclick="openPostReel()" style="background:var(--red);color:#fff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:14px;border:none;cursor:pointer;font-family:'DM Sans',sans-serif">+ Post</button>`:''}
+      <button onclick="openPostReel()" style="background:var(--red);color:#fff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:14px;border:none;cursor:pointer;font-family:'DM Sans',sans-serif">+ Post</button>
     </div>
     ${reels.map(r=>{
       const u=state.users[r.userId];
@@ -6041,6 +6048,33 @@ function playReel(rid){
   const r=SAMPLE_REELS.find(x=>x.id===rid)||(state.myReels||[]).find(x=>x.id===rid);
   if(!r)return;
   alert('Playing: '+r.title+' -- Short-form video, up to 60 seconds.');
+}
+
+// Post a new reel. Soft-launch version: creates a text/caption reel saved on
+// THIS device. (Stage 2 will save it to Supabase so everyone sees it + supports
+// image/video upload.)
+function openPostReel(){
+  const caption=prompt('What do you want to post? (caption)');
+  if(caption===null)return;
+  const trimmed=caption.trim();
+  if(!trimmed){alert('Add a caption to post.');return;}
+  const title=prompt('Short title for your reel (optional):')||'Reel';
+  const myId=ROLE_PROFILES[state.currentRole]?.userId||'me';
+  if(!state.myReels)state.myReels=[];
+  state.myReels.unshift({
+    id:'reel_'+Date.now(),
+    userId:myId,
+    type:'highlight',
+    title:title.trim()||'Reel',
+    caption:trimmed,
+    likes:0,
+    views:0,
+    time:'now',
+    tags:[]
+  });
+  saveState();
+  state.currentTab='reels';
+  render();
 }
 
 // Delete a reel. Owners can delete their own; admins (admin bar unlocked) can
@@ -7141,9 +7175,23 @@ render();
     try{localStorage.removeItem(STORAGE_KEY);}catch(e){}
     location.reload();
   };
-  // Remember the logged-in email so the profile menu can show it.
+  // Remember the logged-in email + name so the profile/menu can show them.
   db.auth.getUser().then(function(res){
-    if(res.data&&res.data.user){window.ruEmail=res.data.user.email;}
+    if(res.data&&res.data.user){
+      window.ruEmail=res.data.user.email;
+      var meta=res.data.user.user_metadata||{};
+      window.ruName=meta.display_name||meta.username||'';
+      window.ruUsername=meta.username||'';
+      // Push the real name into local state so the UI shows it everywhere.
+      try{
+        if(window.ruName && state && state.users && state.users.me){
+          state.users.me.name=window.ruName;
+          if(window.ruName[0])state.users.me.avatar=window.ruName.trim().slice(0,2).toUpperCase();
+          saveState();
+          if(typeof render==='function')render();
+        }
+      }catch(e){}
+    }
   });
 })();
 
