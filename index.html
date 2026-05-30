@@ -6037,7 +6037,20 @@ async function loadReelsFromDB(){
       const pr=await db.from('profiles').select('id,display_name,username,avatar_url').in('id',ids);
       (pr.data||[]).forEach(p=>{profMap[p.id]=p;});
     }
-    state.dbReels=reels.map(r=>({...r,profiles:profMap[r.author_id]||null}));
+    // Likes: pull all likes for these reels, count them, and mark which ones
+    // the current user has liked. (reel_likes table — see likes SQL.)
+    const myId=window.ruUserId||null;
+    let likeCount={}, likedByMe={};
+    const reelIds=reels.map(r=>r.id);
+    if(reelIds.length){
+      const lk=await db.from('reel_likes').select('reel_id,user_id').in('reel_id',reelIds);
+      (lk.data||[]).forEach(row=>{
+        likeCount[row.reel_id]=(likeCount[row.reel_id]||0)+1;
+        if(myId && row.user_id===myId)likedByMe[row.reel_id]=true;
+      });
+    }
+    state.dbReels=reels.map(r=>({...r,profiles:profMap[r.author_id]||null,
+      likeCount:likeCount[r.id]||0, likedByMe:!!likedByMe[r.id]}));
   }catch(e){
     console.log('loadReels error:',e&&e.message);
     alert('Could not load reels: '+(e&&e.message||e));
@@ -6082,7 +6095,36 @@ async function deleteReelDB(id){
   }catch(e){alert('Could not delete: '+(e&&e.message||e));}
 }
 
-// Comments
+// Like / unlike a reel. Optimistic: flip the heart instantly, then sync the DB.
+async function toggleLike(reelId){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  const reel=(state.dbReels||[]).find(r=>r.id===reelId);
+  if(!reel)return;
+  const wasLiked=reel.likedByMe;
+  // Optimistic UI update
+  reel.likedByMe=!wasLiked;
+  reel.likeCount=Math.max(0,(reel.likeCount||0)+(wasLiked?-1:1));
+  render();
+  try{
+    if(wasLiked){
+      const {error}=await db.from('reel_likes').delete().eq('reel_id',reelId).eq('user_id',user.id);
+      if(error)throw error;
+    }else{
+      const {error}=await db.from('reel_likes').insert({reel_id:reelId,user_id:user.id});
+      if(error)throw error;
+    }
+  }catch(e){
+    // Revert on failure
+    reel.likedByMe=wasLiked;
+    reel.likeCount=Math.max(0,(reel.likeCount||0)+(wasLiked?1:-1));
+    render();
+    console.log('toggleLike error:',e);
+    alert('Could not update like: '+(e&&e.message||e));
+  }
+}
+
 async function loadComments(reelId){
   const db=window.ruDB; if(!db)return;
   try{
@@ -6169,6 +6211,7 @@ function renderReelsFeed(role){
             ${r.media_url?`<img src="${r.media_url}" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block" loading="lazy">`:''}
             ${r.caption?`<div style="font-size:13px;color:var(--lighter);line-height:1.5;margin-bottom:10px">${escapeHtml(r.caption)}</div>`:''}
             <div style="display:flex;gap:16px;align-items:center">
+              <button onclick="toggleLike('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:${r.likedByMe?'var(--red)':'var(--light)'};font-family:'DM Sans',sans-serif">${r.likedByMe?'❤️':'🤍'} ${r.likeCount||0}</button>
               <button onclick="toggleComments('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:var(--light);font-family:'DM Sans',sans-serif">💬 Comments${comments.length?(' ('+comments.length+')'):''}</button>
             </div>
             ${showComments?`
