@@ -907,7 +907,138 @@ async function saveProfile(){
   }
 }
 
-function saveState(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch(e){}}
+// ===== Self-listed roles (Option A) =====
+const COMBAT_SPORTS=['Boxing','MMA','Kickboxing','Muay Thai'];
+
+// Field definitions per role. 'req' marks required fields.
+function roleFields(roleId){
+  switch(roleId){
+    case 'fighter': return [
+      {k:'sport',label:'Combat sport',type:'select',opts:COMBAT_SPORTS,req:true},
+      {k:'height',label:'Height (e.g. 5\'9")',type:'text',req:true},
+      {k:'weight',label:'Weight (lbs)',type:'number',req:true},
+      {k:'gym',label:'Gym',type:'gym',req:false},
+      {k:'record',label:'Record (W-L-D, optional)',type:'text',req:false},
+      {k:'stance',label:'Stance (optional)',type:'select',opts:['Orthodox','Southpaw','Switch'],req:false},
+    ];
+    case 'gym': return [
+      {k:'name',label:'Gym name',type:'text',req:true},
+      {k:'location',label:'Location (city/area)',type:'text',req:true},
+      {k:'team',label:'Team / who trains here',type:'text',req:false},
+      {k:'sports',label:'Combat sports offered',type:'text',req:false},
+    ];
+    case 'coach': return [
+      {k:'sport',label:'Combat sport',type:'select',opts:COMBAT_SPORTS,req:true},
+      {k:'specialty',label:'Specialty',type:'select',opts:['Head Coach','Cutman','Strength & Conditioning','Cornerman'],req:true},
+      {k:'gym',label:'Gym',type:'gym',req:false},
+    ];
+    case 'official': return [
+      {k:'type',label:'Official type',type:'select',opts:['Referee','Judge','Timekeeper','Ring Announcer','Inspector','Physician'],req:true},
+      {k:'sport',label:'Combat sport',type:'select',opts:COMBAT_SPORTS,req:true},
+      {k:'years',label:'Years of experience (optional)',type:'number',req:false},
+    ];
+    case 'sponsor': return [
+      {k:'brand',label:'Brand / company name',type:'text',req:true},
+      {k:'looking',label:'What you want to sponsor',type:'select',opts:['Fighters','Gyms','Events','All of the above'],req:true},
+      {k:'website',label:'Website or social (optional)',type:'text',req:false},
+    ];
+    default: return [];
+  }
+}
+const ROLE_LABELS={fighter:'Fighter',gym:'Gym',coach:'Coach / Corner',official:'Official',sponsor:'Sponsor'};
+
+async function openRoleForm(roleId){
+  closeProfileMenu();
+  const fields=roleFields(roleId);
+  const info=(window.ruRole===roleId&&window.ruRoleInfo)?window.ruRoleInfo:{};
+  // For any gym-dropdown field, load existing gyms from the platform.
+  let gymOpts=[];
+  if(fields.some(f=>f.type==='gym')){
+    const db=window.ruDB;
+    if(db){
+      try{
+        const {data}=await db.from('profiles').select('role_info').eq('role','gym').limit(200);
+        gymOpts=[...new Set((data||[]).map(r=>r.role_info&&r.role_info.name).filter(Boolean))];
+      }catch(e){console.log('gym list error:',e&&e.message);}
+    }
+  }
+  let m=document.getElementById('ruRoleForm');
+  if(!m){m=document.createElement('div');m.id='ruRoleForm';m.className='modal-bg';m.onclick=function(e){if(e.target===m)m.style.display='none';};document.body.appendChild(m);}
+  const fieldHtml=fields.map(f=>{
+    const val=(info[f.k]!=null?info[f.k]:'');
+    const reqMark=f.req?' <span style="color:var(--red)">*</span>':'';
+    if(f.type==='select'){
+      return `<label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">${f.label}${reqMark}</label>
+        <select id="rf_${f.k}" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
+          <option value="">— Select —</option>
+          ${f.opts.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+        </select>`;
+    }
+    if(f.type==='gym'){
+      return `<label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">${f.label}${reqMark}</label>
+        <select id="rf_${f.k}" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
+          <option value="Independent / not listed yet" ${(!val||val==='Independent / not listed yet')?'selected':''}>Independent / not listed yet</option>
+          ${gymOpts.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+        </select>
+        <div style="font-size:10px;color:var(--mid);margin-top:4px">Only gyms listed on RoundUp appear here. If yours isn't listed, ask them to create a Gym profile, or stay Independent for now.</div>`;
+    }
+    return `<label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">${f.label}${reqMark}</label>
+      <input id="rf_${f.k}" type="${f.type}" value="${String(val).replace(/"/g,'&quot;')}" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">`;
+  }).join('');
+  m.innerHTML=`
+    <div class="modal" style="text-align:left;max-height:85vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white)">List as ${ROLE_LABELS[roleId]}</div>
+      <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">⏳ Self-listed for early access — not verified by RoundUp. You'll submit real credentials when events launch.</div>
+      ${fieldHtml}
+      <div id="rfMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
+      <button id="rfSaveBtn" onclick="saveRole('${roleId}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">Save</button>
+      <button onclick="document.getElementById('ruRoleForm').style.display='none'" style="width:100%;background:transparent;color:var(--mid);border:none;padding:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:4px">Cancel</button>
+    </div>`;
+  m.style.display='flex';
+}
+
+async function saveRole(roleId){
+  const db=window.ruDB; if(!db){alert('Not connected.');return;}
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  const fields=roleFields(roleId);
+  const msg=document.getElementById('rfMsg');
+  const btn=document.getElementById('rfSaveBtn');
+  const info={};
+  for(const f of fields){
+    const el=document.getElementById('rf_'+f.k);
+    const v=el?el.value.trim():'';
+    if(f.req&&!v){msg.textContent='Please fill in: '+f.label.replace(/<.*?>/g,'');return;}
+    if(v)info[f.k]=v;
+  }
+  btn.disabled=true;btn.textContent='Saving…';msg.textContent='';
+  try{
+    const upd=await db.from('profiles').update({role:roleId,role_info:info}).eq('id',user.id);
+    if(upd.error)throw upd.error;
+    window.ruRole=roleId; window.ruRoleInfo=info;
+    const rm=document.getElementById('ruRoleForm'); if(rm)rm.style.display='none';
+    render();
+    alert('You are now listed as a '+ROLE_LABELS[roleId]+' (self-listed).');
+  }catch(e){
+    console.log('saveRole error:',e);
+    msg.textContent='Could not save: '+(e&&e.message||e);
+    btn.disabled=false;btn.textContent='Save';
+  }
+}
+
+async function clearRole(){
+  if(!confirm('Remove your self-listed role?'))return;
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user)return;
+  try{
+    await db.from('profiles').update({role:null,role_info:{}}).eq('id',user.id);
+    window.ruRole=null; window.ruRoleInfo={};
+    render();
+  }catch(e){alert('Could not remove: '+(e&&e.message||e));}
+}
+
 function resetData(){state=JSON.parse(JSON.stringify(DEFAULT_STATE));saveState();closeAdmin();render();}
 function clearData(){if(!confirm('Clear all data?'))return;state=JSON.parse(JSON.stringify(DEFAULT_STATE));saveState();closeAdmin();render();}
 
@@ -1655,10 +1786,91 @@ function renderOfficialHome(){
 }
 
 /* ===== FIND ===== */
+// ===== Self-listed directory (Find tab) =====
+function loadDirectory(){
+  const db=window.ruDB; if(!db)return;
+  state.dirLoading=true;
+  db.from('profiles').select('id,display_name,username,avatar_url,role,role_info').not('role','is',null).limit(500)
+    .then(function(res){
+      state.directory=res.data||[];
+      state.dirLoading=false;
+      if(state.currentTab==='find')render();
+    }).catch(function(e){state.dirLoading=false;console.log('loadDirectory error:',e&&e.message);});
+}
+
+function renderDirectory(){
+  if(!window._dirLoaded){ window._dirLoaded=true; setTimeout(loadDirectory,0); }
+  const filter=state.findFilter||'all';
+  const all=state.directory||[];
+  const filterMap={all:null,fighters:'fighter',gyms:'gym',coaches:'coach',officials:'official',sponsors:'sponsor'};
+  const want=filterMap[filter];
+  const list=want?all.filter(p=>p.role===want):all;
+
+  const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors']]
+    .map(([f,lbl])=>`<div class="disco-chip ${filter===f?'active':''}" onclick="setFindFilter('${f}')">${lbl}</div>`).join('');
+
+  const head=`
+    <div style="background:rgba(245,166,35,.05);border-bottom:1px solid rgba(245,166,35,.12);padding:8px 18px;font-size:10px;color:var(--gold);line-height:1.4">⏳ Self-listed members · not yet verified by RoundUp</div>
+    <div class="disco-tabs" style="margin-top:10px">${chips}</div>`;
+
+  if(state.dirLoading && all.length===0){
+    return head+`<div class="empty" style="padding:40px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading members…</div></div>`;
+  }
+  if(list.length===0){
+    return head+`<div class="empty"><div class="empty-icon">🔎</div><div class="empty-title">Nobody here yet</div><div class="empty-text">No one has listed themselves${want?(' as a '+want):''} yet. Add your own role from your Profile to be the first.</div><button class="empty-btn" onclick="setTab('profile')">Set my role</button></div>`;
+  }
+
+  const card=(p)=>{
+    const name=p.display_name||p.username||'Creator';
+    const info=p.role_info||{};
+    let sub='';
+    if(p.role==='fighter')sub=[info.sport,info.weight?info.weight+' lbs':'',info.gym&&info.gym!=='Independent / not listed yet'?info.gym:''].filter(Boolean).join(' · ');
+    else if(p.role==='gym')sub=[info.location,info.sports].filter(Boolean).join(' · ');
+    else if(p.role==='coach')sub=[info.specialty,info.sport].filter(Boolean).join(' · ');
+    else if(p.role==='official')sub=[info.type,info.sport].filter(Boolean).join(' · ');
+    else if(p.role==='sponsor')sub=[info.brand,info.looking].filter(Boolean).join(' · ');
+    const roleColor={fighter:'var(--red)',gym:'var(--gold)',coach:'var(--purple)',official:'var(--green)',sponsor:'var(--blue)'}[p.role]||'var(--light)';
+    return `
+      <div onclick="openDirProfile('${p.id}')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
+        ${avatarHtml(p,name,44)}
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${name}</span><span style="font-size:9px;color:${roleColor};font-weight:600;text-transform:uppercase;letter-spacing:.5px">${ROLE_LABELS[p.role]||p.role}</span></div>
+          <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub||'Self-listed'}</div>
+        </div>
+        <span style="color:var(--mid);font-size:16px">›</span>
+      </div>`;
+  };
+
+  return `
+    <div class="search-bar"><span style="font-size:14px">🔎</span><input class="search-input" placeholder="Browse RoundUp members..."></div>
+    ${head}
+    <div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px">
+      ${list.map(card).join('')}
+    </div>
+    <div class="pb-safe"></div>`;
+}
+
+// Tap a directory member: show their details + a Message button.
+function openDirProfile(id){
+  const p=(state.directory||[]).find(x=>x.id===id);
+  if(!p)return;
+  const name=p.display_name||p.username||'Creator';
+  const info=p.role_info||{};
+  const rows=Object.entries(info).map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--dark3)"><span style="font-size:11px;color:var(--mid);text-transform:capitalize">${k}</span><span style="font-size:12px;color:var(--white)">${escapeHtml(String(v))}</span></div>`).join('');
+  openActionModal(name+' · '+(ROLE_LABELS[p.role]||p.role),`
+    <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:8px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin-bottom:12px">⏳ Self-listed — not verified by RoundUp.</div>
+    ${rows||'<div style="font-size:12px;color:var(--mid)">No extra details listed.</div>'}
+    <button onclick="closeActionModal();openConversation('${p.id}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:12px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:14px">Message ${name.split(' ')[0]}</button>
+  `,'',null);
+}
+
 function renderFind(role){
   const filter=state.findFilter||'all';
 
   if(ROLE_PROFILES[role]?.creatorBase){
+    return renderDirectory();
+  }
+  if(false){
     const allFighters=Object.values(state.users).filter(u=>u.role==='fighter');
     const allGyms=Object.values(state.users).filter(u=>u.role==='gym');
     const showFighters=filter==='all'||filter==='fighters';
@@ -2890,39 +3102,40 @@ function renderCreatorProfile(){
       </div>
 
       <!-- ══ CREDENTIAL UNLOCKS (moved from creator home) ══ -->
-      <div class="sec-head" style="margin-top:14px"><div class="sec-title">More Roles — Coming Soon</div></div>
-      <div style="padding:0 18px;margin-bottom:4px;font-size:11px;color:var(--mid);line-height:1.5">
-        Everyone starts as a Creator. Fighter, Gym, Official, and Sponsor roles are on the way — they'll unlock once RoundUp completes licensing and verification with USA Boxing LBC #27. Here's a preview of what each will be able to do.
-      </div>
+      <div class="sec-head" style="margin-top:14px"><div class="sec-title">My Role</div></div>
 
-      <div style="background:rgba(29,184,122,.06);border:1px solid rgba(29,184,122,.15);border-radius:var(--r);margin:0 18px 10px;padding:11px 14px">
-        <div style="font-size:12px;font-weight:600;color:var(--green);margin-bottom:4px">✓ You're a Creator — post and grow freely</div>
-        <div style="font-size:11px;color:var(--mid);line-height:1.5">Post reels, follow people, comment, like, and chat — all live right now. The roles below open in a future update.</div>
+      <div style="background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.25);border-radius:var(--r);margin:0 18px 10px;padding:11px 14px">
+        <div style="font-size:12px;font-weight:600;color:var(--gold);margin-bottom:4px">⏳ Early access — self-listed roles</div>
+        <div style="font-size:11px;color:var(--lighter);line-height:1.55">Pick a role and add your info so the community can see who's who. <strong>This is temporary and self-reported — RoundUp hasn't verified it.</strong> When events launch, you'll need to submit real credentials (USA Boxing membership, ID, medical) to earn an official verified badge.</div>
       </div>
 
       <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
-        ${[
-          {id:'fighter',icon:'🥊',label:'Fighter',tagline:'Accept bouts · Ticket link · Bout agreements',color:'var(--red)',bg:'rgba(232,37,26,.06)',border:'rgba(232,37,26,.3)',blocked:'Bout requests auto-denied until verified'},
-          {id:'gym',icon:'🏋',label:'Gym / Event Host',tagline:'Create cards · Book officials · Earn event revenue',color:'var(--gold)',bg:'rgba(245,166,35,.06)',border:'rgba(245,166,35,.3)'},
-          {id:'official',icon:'⚖',label:'Official',tagline:'Marketplace listing · Upfront booking pay',color:'var(--green)',bg:'rgba(29,184,122,.06)',border:'rgba(29,184,122,.3)'},
-          {id:'corner',icon:'🩺',label:'Corner Team',tagline:'Booking fees · Verified badge · Brand deals · Does not fight',color:'var(--purple)',bg:'rgba(127,119,221,.06)',border:'rgba(127,119,221,.3)'},
-          {id:'sponsor',icon:'💼',label:'Sponsor',tagline:'Type A direct deals · Type B event tiers · Type C fighter backing',color:'var(--blue)',bg:'rgba(42,127,232,.06)',border:'rgba(42,127,232,.3)'},
-        ].map(u=>{
-          const active=myUnlocks.includes(u.id);
-          return `
-          <div style="background:${u.bg};border:1px solid ${active?u.color.replace('var(--red)','rgba(232,37,26,.5)').replace('var(--gold)','rgba(245,166,35,.5)').replace('var(--green)','rgba(29,184,122,.5)').replace('var(--purple)','rgba(127,119,221,.5)').replace('var(--blue)','rgba(42,127,232,.5)'):u.border};border-radius:var(--r);padding:11px 14px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-              <div style="display:flex;align-items:center;gap:8px">
-                <span style="font-size:15px">${u.icon}</span>
-                <span style="font-size:13px;font-weight:600;color:${active?u.color:'var(--white)'}">${u.label}</span>
-                ${active?`<span style="font-size:9px;color:${u.color};font-weight:600">✓ Unlocked</span>`:''}
+        ${(()=>{
+          const myRole=window.ruRole||null;
+          const roles=[
+            {id:'fighter',icon:'🥊',label:'Fighter',tagline:'List your height, weight, combat sport, and gym',color:'var(--red)',bg:'rgba(232,37,26,.06)',border:'rgba(232,37,26,.3)'},
+            {id:'gym',icon:'🏋',label:'Gym',tagline:'List your gym name, location, and team',color:'var(--gold)',bg:'rgba(245,166,35,.06)',border:'rgba(245,166,35,.3)'},
+            {id:'coach',icon:'🩺',label:'Coach / Corner',tagline:'List your combat sport, specialty, and gym',color:'var(--purple)',bg:'rgba(127,119,221,.06)',border:'rgba(127,119,221,.3)'},
+            {id:'official',icon:'⚖',label:'Official',tagline:'List your official type and combat sport',color:'var(--green)',bg:'rgba(29,184,122,.06)',border:'rgba(29,184,122,.3)'},
+            {id:'sponsor',icon:'💼',label:'Sponsor',tagline:'List your brand and what you want to sponsor',color:'var(--blue)',bg:'rgba(42,127,232,.06)',border:'rgba(42,127,232,.3)'},
+          ];
+          return roles.map(u=>{
+            const active=myRole===u.id;
+            return `
+            <div style="background:${u.bg};border:1px solid ${active?u.color:u.border};border-radius:var(--r);padding:11px 14px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:15px">${u.icon}</span>
+                  <span style="font-size:13px;font-weight:600;color:${active?u.color:'var(--white)'}">${u.label}</span>
+                  ${active?`<span style="font-size:9px;color:${u.color};font-weight:600">● Self-listed</span>`:''}
+                </div>
+                <button onclick="openRoleForm('${u.id}')" style="background:${active?'transparent':u.color};color:${active?u.color:'#fff'};border:${active?'1px solid '+u.color:'none'};padding:5px 12px;border-radius:10px;font-size:10px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">${active?'Edit':'List as '+u.label.split(' ')[0]}</button>
               </div>
-              ${active?'':`<span style="background:var(--dark4);color:var(--mid);padding:5px 12px;border-radius:10px;font-size:10px;font-weight:600;font-family:'DM Sans',sans-serif">Coming soon</span>`}
-            </div>
-            <div style="font-size:11px;color:var(--mid);line-height:1.3">${u.tagline}</div>
-            ${!active&&u.blocked?`<div style="font-size:10px;color:var(--red);margin-top:3px">⚠ ${u.blocked}</div>`:''}
-          </div>`;
-        }).join('')}
+              <div style="font-size:11px;color:var(--mid);line-height:1.3">${u.tagline}</div>
+            </div>`;
+          }).join('');
+        })()}
+        ${window.ruRole?`<button onclick="clearRole()" style="background:transparent;border:1px solid var(--dark5);color:var(--mid);padding:9px;border-radius:var(--r);font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif">Remove my self-listed role</button>`:''}
       </div>
 
       <!-- ── MY FIGHTERS ── -->
@@ -5385,95 +5598,74 @@ function renderOSACChecklist(e){
 
 // ── Unified Creator Account / Credential Unlock Model ──
 function renderCreatorHome(){
-  const role=state.currentRole;
-  const myId=ROLE_PROFILES[role]?.userId;
-  const me=myId?state.users[myId]:null;
-  const myUnlocks=me?.unlocks||[];
-  const creatorFollowers=me?.creatorFollowers||0;
-  const mySubs=state.subscriptions||{};
-  const evts=state.events.filter(e=>e.status==='published');
-  const fighters=Object.values(state.users).filter(u=>u.role==='fighter');
-  const gyms=Object.values(state.users).filter(u=>u.role==='gym');
+  // Soft-launch home. There are no demo fighters/gyms/events yet, so instead of
+  // empty rows we show: a welcome hero, a peek at the live reels feed (real
+  // activity), and a clearly-labeled "coming soon" roadmap.
+  const reels=(state.dbReels||[]).slice(0,6);
+  if(!window._reelsLoaded){ window._reelsLoaded=true; setTimeout(loadReelsFromDB,0); }
+
+  const reelsRow = reels.length>0
+    ? `<div class="h-scroll">
+        ${reels.map(r=>{
+          const prof=r.profiles||{};
+          const nm=(prof.display_name||prof.username)||'Creator';
+          const img=r.media_url?`<img src="${r.media_url}" style="width:100%;height:96px;object-fit:cover;display:block" loading="lazy">`:`<div style="width:100%;height:96px;background:linear-gradient(135deg,#1a0000,#0d1a2d);display:flex;align-items:center;justify-content:center;font-size:24px">🥊</div>`;
+          return `
+          <div onclick="setTab('reels')" style="min-width:150px;max-width:150px;flex-shrink:0;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);overflow:hidden;cursor:pointer">
+            ${img}
+            <div style="padding:8px 10px">
+              <div style="font-size:11px;font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nm}</div>
+              <div style="font-size:10px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.caption?escapeHtml(r.caption):'Reel'}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`
+    : `<div style="padding:0 18px"><div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:18px;text-align:center">
+        <div style="font-size:24px;margin-bottom:6px">🎬</div>
+        <div style="font-size:13px;font-weight:600;color:var(--white);margin-bottom:4px">No reels yet — be the first</div>
+        <div style="font-size:11px;color:var(--mid);margin-bottom:12px;line-height:1.5">Post a photo and caption to kick off the feed.</div>
+        <button class="btn-primary" onclick="setTab('reels')">Post a Reel</button>
+      </div></div>`;
 
   return `
     <div class="hero">
       <div class="hero-bg-text">ROUNDUP</div>
       <div class="hero-content">
         <div class="hero-eyebrow">📍 Tulsa, OK · Amateur Boxing</div>
-        <div class="hero-title">${evts.length>0?evts[0].name.replace('Fight Night ','Fight Night<br>'):'Welcome to RoundUp'}</div>
+        <div class="hero-title">Welcome to<br>RoundUp</div>
+        <div style="font-size:12px;color:rgba(255,255,255,.7);margin:6px 0 4px;line-height:1.5;max-width:300px">The home for Tulsa's amateur boxing community. Post, follow, and connect — events and tickets coming soon.</div>
         <div class="hero-cta">
-          ${evts.length>0
-            ?`<button class="btn-primary" onclick="openEvent('${evts[0].id}')">View Card</button>
-               <button class="btn-secondary" onclick="openTicketSelector('${evts[0].id}')">Get Tickets</button>`
-            :`<button class="btn-primary" onclick="setTab('find')">Browse Fighters</button>
-               <button class="btn-secondary" onclick="setTab('reels')">Watch Reels</button>`}
+          <button class="btn-primary" onclick="setTab('reels')">Watch Reels</button>
+          <button class="btn-secondary" onclick="openProfileMenu()">Set Up Profile</button>
         </div>
       </div>
     </div>
 
-    ${evts.length>0?`
-    <div class="sec-head"><div class="sec-title">Upcoming Fight Cards</div><div class="sec-link" onclick="setTab('events')">See all →</div></div>
-    <div style="padding:0 18px">
-      ${evts.map(e=>{
-        const host=state.users[e.hostGym];
-        return `
-        <div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);overflow:hidden;margin-bottom:12px">
-          <div style="background:linear-gradient(90deg,rgba(232,37,26,.1),transparent);padding:12px 14px;border-bottom:1px solid var(--dark4)">
-            <div style="font-size:15px;font-weight:700;color:var(--white);font-family:'Bebas Neue',sans-serif;letter-spacing:1px;margin-bottom:2px">${e.name}</div>
-            <div style="font-size:11px;color:var(--mid)">📅 ${e.date} · ${e.time}</div>
-            <div style="font-size:11px;color:var(--mid)">📍 ${e.venue}</div>
-          </div>
-          <div style="padding:10px 14px">
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-              <span style="font-size:10px;background:rgba(29,184,122,.1);color:var(--green);padding:3px 8px;border-radius:10px;font-weight:500">✓ Sanctioned</span>
-              <span style="font-size:10px;background:rgba(42,127,232,.1);color:var(--blue);padding:3px 8px;border-radius:10px">${e.sanctioning}</span>
-              <span style="font-size:10px;background:var(--dark3);color:var(--mid);padding:3px 8px;border-radius:10px">${e.fights.length} bouts</span>
-            </div>
-            <div style="font-size:11px;color:var(--mid);margin-bottom:10px">Hosted by <strong style="color:var(--lighter)">${host?host.name:'TBD'}</strong></div>
-            <button onclick="openTicketSelector('${e.id}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:10px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Get Tickets →</button>
-          </div>
-        </div>`;
-      }).join('')}
-    </div>`:''}
+    <div class="sec-head"><div class="sec-title">Latest Reels</div><div class="sec-link" onclick="setTab('reels')">See all →</div></div>
+    ${reelsRow}
 
-    <div class="sec-head"><div class="sec-title">Follow Fighters</div><div class="sec-link" onclick="setTab('find')">See all →</div></div>
-    <div class="h-scroll">
-      ${fighters.map(f=>{
-        const sub=mySubs['sub_'+f.id]||'none';
-        const subColor=sub==='ringside'?'var(--red)':sub==='corner'?'var(--gold)':sub==='free'?'var(--green)':'var(--light)';
-        const subLabel=sub==='ringside'?'🔥 Ringside':sub==='corner'?'⭐ Corner':sub==='free'?'✓ Following':'Follow';
-        return `
-        <div class="fighter-mini" onclick="openUserProfile('${f.id}')">
-          <div class="fm-avatar ${sub!=='none'?'verified':''}" style="background:${avatarBg(f.color)};color:${avatarColor(f.color)}">${f.avatar}</div>
-          <div class="fm-name">${shortName(f.name)}</div>
-          <div class="fm-weight">${f.weight}</div>
-          <div class="fm-record">${f.record.w}-${f.record.l}-${f.record.d}</div>
-          <div class="fm-fans" style="color:${subColor}">${subLabel}</div>
-        </div>`;
-      }).join('')}
+    <div class="sec-head" style="margin-top:6px"><div class="sec-title">Coming Soon</div></div>
+    <div style="padding:0 18px 4px;font-size:11px;color:var(--mid);line-height:1.5;margin-bottom:8px">More is on the way for RoundUp. Here's what we're building next:</div>
+    <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px">
+      ${[
+        ['🎟','Live event tickets','Buy tickets to sanctioned Tulsa fight cards right in the app.'],
+        ['🥊','Verified fighter profiles','Real fighter pages with records, rankings, and upcoming bouts.'],
+        ['🏋','Gym pages','Follow your gym, see its roster, and get event news.'],
+        ['⚖','Sanctioned events','Full cards run with USA Boxing LBC #27 officials and rules.'],
+      ].map(([ic,t,d])=>`
+        <div style="display:flex;gap:12px;align-items:flex-start;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:12px 14px">
+          <span style="font-size:18px;flex-shrink:0">${ic}</span>
+          <div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--white);margin-bottom:2px">${t}</div><div style="font-size:11px;color:var(--mid);line-height:1.5">${d}</div></div>
+          <span style="background:var(--dark4);color:var(--mid);font-size:9px;font-weight:600;padding:3px 8px;border-radius:8px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;align-self:center">Soon</span>
+        </div>`).join('')}
     </div>
-
-    <div class="sec-head"><div class="sec-title">Follow Gyms</div><div class="sec-link" onclick="setTab('find')">Browse →</div></div>
-    <div class="h-scroll">
-      ${gyms.map(g=>{
-        const gymSub=(state.gymSubs||{})[g.id]||'none';
-        const roster=getGymRoster(g.id);
-        const subColor=gymSub==='gym_vip'?'var(--red)':gymSub==='gym_insider'?'var(--purple)':gymSub==='gym_corner'?'var(--gold)':gymSub==='gym_follow'?'var(--blue)':'var(--light)';
-        const subLabel=gymSub==='gym_vip'?'👑 VIP':gymSub==='gym_insider'?'🎯 Insider':gymSub==='gym_corner'?'⭐ Corner':gymSub==='gym_follow'?'🥊 Following':'Follow';
-        return `
-        <div class="fighter-mini" onclick="openUserProfile('${g.id}')" style="width:90px">
-          <div class="fm-avatar ${gymSub!=='none'&&gymSub!=='gym_follow'?'verified':''}" style="background:${avatarBg(g.color)};color:${avatarColor(g.color)};font-size:18px">${g.avatar}</div>
-          <div class="fm-name" style="font-size:10px">${g.name.replace(' Boxing','').replace(' Gym','')}</div>
-          <div class="fm-weight">${roster.fighters.length} fighters</div>
-          <div class="fm-fans" style="color:${subColor}">${subLabel}</div>
-        </div>`;
-      }).join('')}
+    <div style="padding:14px 18px 0">
+      <button class="btn-secondary" style="width:100%;padding:11px" onclick="setTab('events')">See the full roadmap →</button>
     </div>
 
     <div class="pb-safe"></div>
   `;
 }
-
 function openCredentialUnlock(unlockType){
   const configs={
     fighter:{label:'Fighter Unlock',docs:['USA Boxing passbook (current year)','Date of birth confirmation','Medical clearance — HIV/HepB/HepC bloodwork within 365 days','Government photo ID','If under 18: parent/guardian consent + linked guardian account']},
@@ -7515,7 +7707,7 @@ function attachHandlers(){
     b.onclick=()=>{state.currentRole=b.dataset.role;state.currentScreen='main';state.drilldown=null;state.currentTab=ROLE_PROFILES[b.dataset.role].tabs[0];saveState();render();};
   });
 }
-function setTab(t){state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();if(t==='inbox'&&typeof loadInbox==='function')loadInbox();}
+function setTab(t){state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();if(t==='inbox'&&typeof loadInbox==='function')loadInbox();if(t==='find'&&typeof loadDirectory==='function')loadDirectory();}
 function openConv(otherId){state.currentScreen='conversation';state.drilldown=otherId;state.dmThreadOtherId=null;state.dmThreadMsgs=[];render();setTimeout(()=>loadDMThread(otherId),0);}
 function openConversation(pid){openConv(pid);}
 function openUserProfile(id){state.currentScreen='profile_detail';state.drilldown=id;saveState();render();}
@@ -7683,12 +7875,14 @@ render();
       var meta=res.data.user.user_metadata||{};
       window.ruName=meta.display_name||meta.username||'';
       window.ruUsername=meta.username||'';
-      // Load the saved profile photo (if any) so it shows after refresh.
-      db.from('profiles').select('display_name,avatar_url').eq('id',res.data.user.id).limit(1).then(function(pr){
+      // Load the saved profile photo + self-listed role (if any) after refresh.
+      db.from('profiles').select('display_name,avatar_url,role,role_info').eq('id',res.data.user.id).limit(1).then(function(pr){
         var row=pr&&pr.data&&pr.data[0];
         if(row){
           if(row.avatar_url)window.ruAvatarUrl=row.avatar_url;
           if(row.display_name)window.ruName=row.display_name;
+          window.ruRole=row.role||null;
+          window.ruRoleInfo=row.role_info||{};
           if(typeof render==='function')render();
         }
       });
