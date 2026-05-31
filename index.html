@@ -1745,7 +1745,7 @@ function renderInbox(role){
                 <div class="chat-name-l"><div class="chat-name">${name}</div></div>
                 <div class="chat-time">${timeAgo(c.lastAt)}</div>
               </div>
-              <div class="chat-preview">${escapeHtml(c.lastBody||'')}</div>
+              <div class="chat-preview">${/^\[reel:/.test(c.lastBody||'')?'📨 Shared a reel':escapeHtml(c.lastBody||'')}</div>
             </div>
           </div>`;
       }).join('')}
@@ -3547,7 +3547,19 @@ function renderConversation(){
     <div class="msgs" id="msgsContainer">
       ${msgs.length===0
         ? `<div style="text-align:center;color:var(--mid);font-size:12px;margin-top:30px">No messages yet. Say hello 👋</div>`
-        : msgs.map(m=>`<div class="msg ${m.sender_id===myId?'mine':'theirs'}">${escapeHtml(m.body)}</div>`).join('')}
+        : msgs.map(m=>{
+            const rm=(m.body||'').match(/^\[reel:([0-9a-fA-F-]+)\]$/);
+            if(rm){
+              const reel=(state.dmReelCards||{})[rm[1]];
+              const cap=reel?escapeHtml(reel.caption||''):'';
+              const img=reel&&reel.media_url?`<img src="${reel.media_url}" style="width:100%;border-radius:10px 10px 0 0;display:block" loading="lazy">`:'';
+              const inner=reel
+                ? `${img}<div style="padding:8px 10px"><div style="font-size:10px;color:var(--mid);margin-bottom:2px">📨 Shared reel</div><div style="font-size:12px;color:var(--white)">${cap||'(no caption)'}</div></div>`
+                : `<div style="padding:10px 12px;font-size:12px;color:var(--mid)">📨 Shared reel (tap to view)</div>`;
+              return `<div class="msg ${m.sender_id===myId?'mine':'theirs'}" style="padding:0;overflow:hidden;cursor:pointer;max-width:70%" onclick="setTab('reels')">${inner}</div>`;
+            }
+            return `<div class="msg ${m.sender_id===myId?'mine':'theirs'}">${escapeHtml(m.body)}</div>`;
+          }).join('')}
     </div>
     <div class="composer">
       <input class="comp-input" id="msgInput" placeholder="Message ${name}..." onkeydown="if(event.key==='Enter')sendMsg()">
@@ -3574,6 +3586,16 @@ async function loadDMThread(otherId){
     if(error)throw error;
     state.dmThreadMsgs=data||[];
     state.dmThreadOtherId=otherId;
+    // If any messages are shared reels ([reel:ID]), fetch those reels so we can
+    // show a preview card with the image + caption.
+    const reelIds=[...new Set((data||[])
+      .map(m=>{const mt=(m.body||'').match(/^\[reel:([0-9a-fA-F-]+)\]$/);return mt?mt[1]:null;})
+      .filter(Boolean))];
+    if(reelIds.length){
+      if(!state.dmReelCards)state.dmReelCards={};
+      const rr=await db.from('reels').select('id,caption,media_url').in('id',reelIds);
+      (rr.data||[]).forEach(r=>{state.dmReelCards[r.id]=r;});
+    }
     // Partner profile
     const pr=await db.from('profiles').select('id,display_name,username').eq('id',otherId).limit(1);
     state.dmThreadProfile=(pr.data&&pr.data[0])||null;
@@ -6171,10 +6193,11 @@ async function toggleLike(reelId){
   const reel=(state.dbReels||[]).find(r=>r.id===reelId);
   if(!reel)return;
   const wasLiked=reel.likedByMe;
-  // Optimistic UI update
+  // Optimistic update — change ONLY this one button, not the whole feed, so the
+  // page doesn't jump back to the top.
   reel.likedByMe=!wasLiked;
   reel.likeCount=Math.max(0,(reel.likeCount||0)+(wasLiked?-1:1));
-  render();
+  paintLikeBtn(reel);
   try{
     if(wasLiked){
       const {error}=await db.from('reel_likes').delete().eq('reel_id',reelId).eq('user_id',user.id);
@@ -6184,12 +6207,61 @@ async function toggleLike(reelId){
       if(error)throw error;
     }
   }catch(e){
-    // Revert on failure
+    // Revert on failure (still just the one button)
     reel.likedByMe=wasLiked;
     reel.likeCount=Math.max(0,(reel.likeCount||0)+(wasLiked?1:-1));
-    render();
+    paintLikeBtn(reel);
     console.log('toggleLike error:',e);
     alert('Could not update like: '+(e&&e.message||e));
+  }
+}
+function paintLikeBtn(reel){
+  const btn=document.getElementById('like_'+reel.id);
+  if(!btn)return;
+  btn.style.color=reel.likedByMe?'var(--red)':'var(--light)';
+  btn.innerHTML=(reel.likedByMe?'❤️':'🤍')+' '+(reel.likeCount||0);
+}
+
+// Share a reel into a chat: pick a person, then drop a message that links to
+// the reel. We send it as text with a [reel:ID] marker — the chat detects that
+// marker and renders a preview card. No new database column needed.
+async function openShareReel(reelId){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  let people=[];
+  try{
+    const {data}=await db.from('profiles').select('id,display_name,username').neq('id',user.id).limit(200);
+    people=data||[];
+  }catch(e){console.log('openShareReel error:',e&&e.message);}
+  openActionModal('Send Reel To…',
+    people.length===0
+      ? `<div style="font-size:12px;color:var(--mid);line-height:1.6">No other accounts to send to yet. Once others sign up, they'll show here.</div>`
+      : `<div style="font-size:11px;color:var(--mid);margin-bottom:10px">Tap someone to send them this reel.</div>
+         <div style="display:flex;flex-direction:column;gap:8px">
+         ${people.map(p=>{const n=p.display_name||p.username||'Creator';return `
+           <div onclick="sendReelToUser('${reelId}','${p.id}')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
+             <div style="width:36px;height:36px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:13px">${initials(n)}</div>
+             <div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--white)">${n}</div>${p.username?`<div style="font-size:11px;color:var(--mid)">@${p.username}</div>`:''}</div>
+             <span style="color:var(--mid);font-size:16px">›</span>
+           </div>`;}).join('')}
+         </div>`,
+    '',null);
+}
+
+async function sendReelToUser(reelId, otherId){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  try{
+    const {error}=await db.from('messages').insert({sender_id:user.id,recipient_id:otherId,body:'[reel:'+reelId+']'});
+    if(error)throw error;
+    closeActionModal();
+    // Jump straight into that conversation so they see it was sent.
+    openConv(otherId);
+  }catch(e){
+    console.log('sendReelToUser error:',e);
+    alert('Could not send: '+(e&&e.message||e));
   }
 }
 
@@ -6279,8 +6351,9 @@ function renderReelsFeed(role){
             ${r.media_url?`<img src="${r.media_url}" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block" loading="lazy">`:''}
             ${r.caption?`<div style="font-size:13px;color:var(--lighter);line-height:1.5;margin-bottom:10px">${escapeHtml(r.caption)}</div>`:''}
             <div style="display:flex;gap:16px;align-items:center">
-              <button onclick="toggleLike('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:${r.likedByMe?'var(--red)':'var(--light)'};font-family:'DM Sans',sans-serif">${r.likedByMe?'❤️':'🤍'} ${r.likeCount||0}</button>
+              <button id="like_${r.id}" onclick="toggleLike('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:${r.likedByMe?'var(--red)':'var(--light)'};font-family:'DM Sans',sans-serif">${r.likedByMe?'❤️':'🤍'} ${r.likeCount||0}</button>
               <button onclick="toggleComments('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:var(--light);font-family:'DM Sans',sans-serif">💬 Comments${comments.length?(' ('+comments.length+')'):''}</button>
+              <button onclick="openShareReel('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:var(--light);font-family:'DM Sans',sans-serif">📨 Send</button>
             </div>
             ${showComments?`
               <div style="margin-top:12px;border-top:1px solid var(--dark3);padding-top:12px">
