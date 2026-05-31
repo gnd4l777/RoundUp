@@ -1719,41 +1719,74 @@ function setFindFilter(f){state.findFilter=f;render();}
 
 /* ===== INBOX ===== */
 function renderInbox(role){
-  // No inbox gate — canMessageUser handles per-conversation permission
-  const _myId2=ROLE_PROFILES[role]?.userId;
-  const _myConvs=state.conversations.filter(c=>{
-    if(!_myId2)return false;
-    if(_myId2==='mw')return true;
-    return c.messages.some(msg=>msg.from===_myId2)||c.participant===_myId2;
-  });
-  if(_myConvs.length===0)return `
-    <div class="access-banner"><div class="access-icon">🔒</div><div class="access-text"><strong>Verified Pro Network</strong> · End-to-end encrypted</div></div>
-    <div class="empty"><div class="empty-icon">💬</div><div class="empty-title">No messages yet</div><div class="empty-text">Use the Network tab to find and message gyms, fighters, sponsors, and coaches.</div><button class="empty-btn" onclick="setTab('find')">Go to Network</button></div>
-  `;
-  return `
-    <div class="access-banner"><div class="access-icon">🔒</div><div class="access-text"><strong>Verified Pro Network</strong> · End-to-end encrypted · Conduct monitored</div></div>
+  // Real direct messages, backed by the Supabase 'messages' table.
+  if(!window._dmInboxLoaded){ window._dmInboxLoaded=true; setTimeout(loadInbox,0); }
+  const list=state.dmInbox||[];
+  const header=`
+    <div style="background:var(--dark);position:sticky;top:0;z-index:10;border-bottom:1px solid var(--dark3);padding:10px 18px;display:flex;justify-content:space-between;align-items:center">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:var(--white)">Messages</div>
+      <button onclick="openNewDM()" style="background:var(--red);color:#fff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:14px;border:none;cursor:pointer;font-family:'DM Sans',sans-serif">+ New</button>
+    </div>`;
+  if(state.dmInboxLoading && list.length===0){
+    return header+`<div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading messages…</div></div>`;
+  }
+  if(list.length===0){
+    return header+`<div class="empty"><div class="empty-icon">💬</div><div class="empty-title">No messages yet</div><div class="empty-text">Tap + New to start a conversation with someone on RoundUp.</div><button class="empty-btn" onclick="openNewDM()">Start a chat</button></div>`;
+  }
+  return header+`
     <div class="chat-list">
-      ${_myConvs.map(c=>{
-        const u=state.users[c.participant];if(!u)return '';
-        const last=c.messages.filter(m=>m.from!=='system'&&m.from!=='flagged').slice(-1)[0];
-        const preview=last?(last.type==='proposal'?'📋 Fight proposal':last.text):'';
+      ${list.map(c=>{
+        const name=(c.profile&&(c.profile.display_name||c.profile.username))||'Creator';
         return `
-          <div class="chat-row" onclick="openConv('${c.id}')">
-            <div class="chat-avatar" style="background:${avatarBg(u.color)};color:${avatarColor(u.color)}">${u.avatar}<div class="role-dot ${u.role}"></div></div>
+          <div class="chat-row" onclick="openConv('${c.otherId}')">
+            <div class="chat-avatar" style="background:var(--red);color:#fff">${initials(name)}</div>
             <div class="chat-info">
               <div class="chat-name-row">
-                <div class="chat-name-l"><div class="chat-name">${u.name}</div><span class="chat-tag ct-${u.role}">${u.subRole||u.role}</span></div>
-                <div class="chat-time">${c.lastTime}</div>
+                <div class="chat-name-l"><div class="chat-name">${name}</div></div>
+                <div class="chat-time">${timeAgo(c.lastAt)}</div>
               </div>
-              <div class="chat-preview ${c.unread?'unread':''}">${preview}</div>
+              <div class="chat-preview">${escapeHtml(c.lastBody||'')}</div>
             </div>
-            ${c.unread?`<div class="chat-badge">${c.unread}</div>`:''}
-          </div>
-        `;
+          </div>`;
       }).join('')}
     </div>
     <div class="pb-safe"></div>
   `;
+}
+
+// Load the inbox: latest message per conversation partner.
+async function loadInbox(){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user)return;
+  const myId=user.id;
+  state.dmInboxLoading=true;
+  try{
+    const {data,error}=await db.from('messages')
+      .select('id,sender_id,recipient_id,body,created_at')
+      .or('sender_id.eq.'+myId+',recipient_id.eq.'+myId)
+      .order('created_at',{ascending:false})
+      .limit(300);
+    if(error)throw error;
+    const rows=data||[];
+    const seen={}, order=[];
+    rows.forEach(m=>{
+      const other=m.sender_id===myId?m.recipient_id:m.sender_id;
+      if(!other)return;
+      if(!seen[other]){ seen[other]={otherId:other,lastBody:m.body,lastAt:m.created_at,profile:null}; order.push(other); }
+    });
+    // Look up partner names.
+    if(order.length){
+      const pr=await db.from('profiles').select('id,display_name,username').in('id',order);
+      const pmap={}; (pr.data||[]).forEach(p=>{pmap[p.id]=p;});
+      order.forEach(id=>{ seen[id].profile=pmap[id]||null; });
+    }
+    state.dmInbox=order.map(id=>seen[id]);
+  }catch(e){
+    console.log('loadInbox error:',e&&e.message);
+  }
+  state.dmInboxLoading=false;
+  if(state.currentTab==='inbox'&&state.currentScreen==='main')render();
 }
 
 /* ===== EVENTS ===== */
@@ -3495,82 +3528,117 @@ function renderGenericPublic(u){
 
 /* ===== CONVERSATION ===== */
 function renderConversation(){
-  if(state.currentRole==='fan')return renderMain();
-  const conv=state.conversations.find(c=>c.id===state.drilldown);
-  if(!conv)return renderEmpty('Not found','Go back to inbox');
-  const u=state.users[conv.participant];
-  const meRole=state.currentRole;
-  const meId=ROLE_PROFILES[state.currentRole]?.userId;
-  const me=state.users[meId]||{};
-  const isFighterToFighter=(meRole==='fighter'||meRole==='fighter2'||meRole==='fighter3')&&u.role==='fighter';
-  const isMinorInvolved=(me?.isMinor===true)||(u?.isMinor===true);
-  // Verification-based messaging check (item 1.1, 1.4)
-  if(!canMessageUser(meId, conv.participant)){
-    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Message</div><div style="width:34px"></div></div><div class="empty"><div class="empty-icon">🔒</div><div class="empty-title">Cannot send message</div><div class="empty-text">Messaging requires at least one completed verification step on both accounts. Verify your credentials to unlock direct messaging.</div></div>`;
+  const otherId=state.drilldown;
+  const myId=window.ruUserId||null;
+  // If the loaded thread isn't this one, (re)load it.
+  if(state.dmThreadOtherId!==otherId && !state.dmThreadLoading){
+    setTimeout(()=>loadDMThread(otherId),0);
   }
+  const prof=state.dmThreadProfile||{};
+  const name=(prof.display_name||prof.username)||'Loading…';
+  const msgs=(state.dmThreadOtherId===otherId)?(state.dmThreadMsgs||[]):[];
   return `
     <div class="conv-header">
       <button class="back-btn" onclick="goBack()">‹</button>
-      <div class="conv-av" style="background:${avatarBg(u.color)};color:${avatarColor(u.color)}">${u.avatar}</div>
-      <div class="conv-info"><div class="conv-name-row"><div class="conv-name">${u.name}</div><span class="conv-verified">✓</span></div><div class="conv-meta">${(u.subRole||u.role).charAt(0).toUpperCase()+(u.subRole||u.role).slice(1)} · Verified</div></div>
-      <button class="nav-icon" onclick="openRevenueReport('${meId||'mw'}')">📊</button>
+      <div class="conv-av" style="background:var(--red);color:#fff">${initials(name)}</div>
+      <div class="conv-info"><div class="conv-name-row"><div class="conv-name">${name}</div></div><div class="conv-meta">Direct message</div></div>
+      <div style="width:34px"></div>
     </div>
-    <div class="encrypt-bar">🔒 End-to-end encrypted · All threads conduct-monitored</div>
-    <div class="conduct-banner">⚠ All conversations monitored · Harassment, threats, and unsolicited solicitation result in immediate suspension</div>
-    ${isMinorInvolved?`<div style="background:rgba(232,37,26,.1);border-bottom:1px solid rgba(232,37,26,.25);padding:8px 18px;font-size:11px;color:var(--red);font-weight:600">⚠ Minor account involved — this conversation is available for guardian review</div>`:''}
-      ${conv.messages.map(m=>{
-        if(m.from==='system')return `<div class="msg system">${m.text}</div>`;
-        if(m.from==='flagged')return `<div class="msg flagged">⚠ Message blocked: ${m.text}</div>`;
-        if(m.type==='proposal'){
-          const mw=state.users.mw,opp=state.users.jt;
-          return `<div class="prop-card"><div class="prop-head"><span>📋 Bout Invitation</span><span class="prop-status">Awaiting accept</span></div><div class="prop-body">
-            <div class="prop-fighters"><div class="prop-side"><div class="prop-side-av" style="background:${avatarBg(mw.color)};color:${avatarColor(mw.color)}">${mw.avatar}</div><div class="prop-side-n">You</div><div class="prop-side-r">${mw.record.w}-${mw.record.l}</div></div><div class="prop-vs">VS</div><div class="prop-side"><div class="prop-side-av" style="background:${avatarBg(opp.color)};color:${avatarColor(opp.color)}">${opp.avatar}</div><div class="prop-side-n">${shortName(opp.name)}</div><div class="prop-side-r">${opp.record.w}-${opp.record.l}</div></div></div>
-            <div class="prop-details"><div class="prop-detail"><div class="prop-d-l">Event</div><div class="prop-d-v">${m.data.event}</div></div><div class="prop-detail"><div class="prop-d-l">Date</div><div class="prop-d-v">${m.data.date}</div></div><div class="prop-detail"><div class="prop-d-l">Weight</div><div class="prop-d-v">${m.data.weight}</div></div><div class="prop-detail"><div class="prop-d-l">Format</div><div class="prop-d-v">${m.data.format}</div></div><div class="prop-detail"><div class="prop-d-l">Sanctioning</div><div class="prop-d-v">USA Boxing LBC #27</div></div><div class="prop-detail"><div class="prop-d-l">Bout type</div><div class="prop-d-v">Amateur</div></div></div>
-            <div style="background:rgba(42,127,232,.06);border-radius:6px;padding:7px 10px;font-size:10px;color:var(--mid);line-height:1.5;margin-bottom:8px">Amateur bout — no fight purse. Fighters may earn through ticket sales commission, content subscriptions, and brand deals, all independent of bout participation or outcome.</div>
-            <div class="prop-cta"><button class="prop-btn accept" onclick="acceptProposal()">Accept</button><button class="prop-btn counter">Counter</button><button class="prop-btn counter">Details</button></div>
-          </div></div>`;
-        }
-        const _myId=ROLE_PROFILES[state.currentRole]?.userId||'me';
-        return `<div class="msg ${m.from===_myId||m.from==='me'?'mine':'theirs'}">${m.text}</div>`;
-      }).join('')}
+    <div class="msgs" id="msgsContainer">
+      ${msgs.length===0
+        ? `<div style="text-align:center;color:var(--mid);font-size:12px;margin-top:30px">No messages yet. Say hello 👋</div>`
+        : msgs.map(m=>`<div class="msg ${m.sender_id===myId?'mine':'theirs'}">${escapeHtml(m.body)}</div>`).join('')}
     </div>
-    ${isFighterToFighter?`<div class="preset-bar">
-      <button class="preset-chip" onclick="sendPreset('Good luck in the ring 👊')">Good luck 👊</button>
-      <button class="preset-chip" onclick="sendPreset('See you at weigh-in.')">See you at weigh-in</button>
-      <button class="preset-chip" onclick="sendPreset('Confirmed for the bout.')">Confirmed</button>
-      <button class="preset-chip" onclick="sendPreset('Respect, brother. Best of luck.')">Respect</button>
-    </div>`:''}
     <div class="composer">
-      <button class="comp-attach">+</button>
-      <input class="comp-input" id="msgInput" placeholder="Message ${u.name}..." onkeydown="if(event.key==='Enter')sendMsg()">
+      <input class="comp-input" id="msgInput" placeholder="Message ${name}..." onkeydown="if(event.key==='Enter')sendMsg()">
       <button class="comp-send" onclick="sendMsg()">↑</button>
     </div>
   `;
 }
-function sendPreset(text){const inp=document.getElementById('msgInput');inp.value=text;sendMsg();}
-function sendMsg(){
+function sendPreset(text){const inp=document.getElementById('msgInput');if(inp){inp.value=text;sendMsg();}}
+
+// Load one DM thread between me and the other user, plus their profile.
+async function loadDMThread(otherId){
+  const db=window.ruDB; if(!db||!otherId)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user)return;
+  const myId=user.id;
+  state.dmThreadLoading=true;
+  try{
+    const filter='and(sender_id.eq.'+myId+',recipient_id.eq.'+otherId+'),and(sender_id.eq.'+otherId+',recipient_id.eq.'+myId+')';
+    const {data,error}=await db.from('messages')
+      .select('id,sender_id,recipient_id,body,created_at')
+      .or(filter)
+      .order('created_at',{ascending:true})
+      .limit(500);
+    if(error)throw error;
+    state.dmThreadMsgs=data||[];
+    state.dmThreadOtherId=otherId;
+    // Partner profile
+    const pr=await db.from('profiles').select('id,display_name,username').eq('id',otherId).limit(1);
+    state.dmThreadProfile=(pr.data&&pr.data[0])||null;
+  }catch(e){
+    console.log('loadDMThread error:',e&&e.message);
+  }
+  state.dmThreadLoading=false;
+  if(state.currentScreen==='conversation'&&state.drilldown===otherId){
+    render();
+    setTimeout(()=>{const c=document.getElementById('msgsContainer');if(c)c.scrollTop=c.scrollHeight;},60);
+  }
+}
+
+async function sendMsg(){
   const inp=document.getElementById('msgInput');
+  if(!inp)return;
   const text=inp.value.trim();
   if(!text)return;
-  const conv=state.conversations.find(c=>c.id===state.drilldown);
-  if(!conv)return;
-  const meRole=state.currentRole;
-  const meId=ROLE_PROFILES[meRole]?.userId;
-  // Universal conduct filter — applies to ALL threads (item 1.2)
-  if(checkConduct(text)){
-    conv.messages.push({from:'flagged',text:'Message blocked: conduct monitoring flagged this message. Platform rule: harassment, threats, and unsolicited solicitation result in immediate account suspension.'});
-    conv.lastTime='Now';
-    saveState();render();
-    setTimeout(()=>{const c=document.getElementById('msgsContainer');if(c)c.scrollTop=c.scrollHeight;},50);
-    return;
-  }
-  conv.messages.push({from:meId||'me',text,time:'Now'});
-  conv.lastTime='Now';
+  const otherId=state.drilldown;
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
   inp.value='';
-  saveState();render();
-  setTimeout(()=>{const c=document.getElementById('msgsContainer');if(c)c.scrollTop=c.scrollHeight;},50);
+  // Optimistic append
+  if(!state.dmThreadMsgs)state.dmThreadMsgs=[];
+  state.dmThreadMsgs.push({id:'tmp'+Date.now(),sender_id:user.id,recipient_id:otherId,body:text,created_at:new Date().toISOString()});
+  render();
+  setTimeout(()=>{const c=document.getElementById('msgsContainer');if(c)c.scrollTop=c.scrollHeight;},40);
+  try{
+    const {error}=await db.from('messages').insert({sender_id:user.id,recipient_id:otherId,body:text});
+    if(error)throw error;
+    await loadDMThread(otherId);
+  }catch(e){
+    console.log('sendMsg error:',e);
+    alert('Could not send: '+(e&&e.message||e));
+    await loadDMThread(otherId);
+  }
 }
-function acceptProposal(){alert('Proposal accepted. Bout submitted to Oklahoma LBC #27 for amateur sanctioning. Confirm both fighters hold current USA Boxing memberships before the event date.');}
+
+// Pick someone to start a new chat with — lists real RoundUp accounts.
+async function openNewDM(){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user)return;
+  let people=[];
+  try{
+    const {data}=await db.from('profiles').select('id,display_name,username').neq('id',user.id).limit(200);
+    people=data||[];
+  }catch(e){console.log('openNewDM error:',e&&e.message);}
+  openActionModal('New Message',
+    people.length===0
+      ? `<div style="font-size:12px;color:var(--mid);line-height:1.6">No other accounts found yet. Once other people sign up, they'll show here and you can message them.</div>`
+      : `<div style="font-size:11px;color:var(--mid);margin-bottom:10px">Tap someone to start a conversation.</div>
+         <div style="display:flex;flex-direction:column;gap:8px">
+         ${people.map(p=>{const n=p.display_name||p.username||'Creator';return `
+           <div onclick="closeActionModal();openConversation('${p.id}')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
+             <div style="width:36px;height:36px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:13px">${initials(n)}</div>
+             <div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--white)">${n}</div>${p.username?`<div style="font-size:11px;color:var(--mid)">@${p.username}</div>`:''}</div>
+             <span style="color:var(--mid);font-size:16px">›</span>
+           </div>`;}).join('')}
+         </div>`,
+    '',null);
+}
+
+function acceptProposal(){alert('Proposal accepted.');}
 
 /* ===== EVENT DETAIL ===== */
 function computeDraftPct(e){
@@ -7221,24 +7289,12 @@ function attachHandlers(){
     b.onclick=()=>{state.currentRole=b.dataset.role;state.currentScreen='main';state.drilldown=null;state.currentTab=ROLE_PROFILES[b.dataset.role].tabs[0];saveState();render();};
   });
 }
-function setTab(t){state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();}
-function openConv(id){if(state.currentRole==='fan')return;state.currentScreen='conversation';state.drilldown=id;saveState();render();setTimeout(()=>{const c=document.getElementById('msgsContainer');if(c)c.scrollTop=c.scrollHeight;},50);}
-function openConversation(pid){
-  // No hard block on openConv — canMessageUser handles per-conversation permission
-  let conv=state.conversations.find(c=>c.participant===pid);
-  if(!conv){
-    const me=state.users[ROLE_PROFILES[state.currentRole].userId];
-    const them=state.users[pid];
-    const isFighterToFighter=(me?.role==='fighter'||me?.role==='fighter2'||me?.role==='fighter3')&&(them?.role==='fighter'||them?.role==='fighter2'||them?.role==='fighter3');
-    conv={id:'c'+Date.now(),participant:pid,unread:0,lastTime:'Now',isFighterToFighter,messages:[]};
-    if(isFighterToFighter){conv.messages.push({from:'system',text:'⚠ Fighter-to-fighter chat. Pro conduct expected. Trash talk and threats are monitored and may result in bout cancellation.'});}
-    state.conversations.unshift(conv);saveState();
-  }
-  openConv(conv.id);
-}
+function setTab(t){state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();if(t==='inbox'&&typeof loadInbox==='function')loadInbox();}
+function openConv(otherId){state.currentScreen='conversation';state.drilldown=otherId;state.dmThreadOtherId=null;state.dmThreadMsgs=[];render();setTimeout(()=>loadDMThread(otherId),0);}
+function openConversation(pid){openConv(pid);}
 function openUserProfile(id){state.currentScreen='profile_detail';state.drilldown=id;saveState();render();}
 function openEvent(id){state.currentScreen='event_detail';state.drilldown=id;saveState();render();}
-function goBack(){state.currentScreen='main';state.drilldown=null;saveState();render();}
+function goBack(){state.currentScreen='main';state.drilldown=null;saveState();render();if(state.currentTab==='inbox')setTimeout(loadInbox,0);}
 function openInvestorView(){closeAdmin();state.currentScreen='investor_analytics';state.drilldown=null;render();}
 function openAdminVerify(){closeAdmin();state.currentScreen='admin_verify';render();}
 function openGuardianPortal(){closeAdmin();state.currentScreen='guardian_portal';render();}
