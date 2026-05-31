@@ -805,13 +805,17 @@ function openProfileMenu(){
     <div class="modal" style="text-align:left">
       <div class="modal-handle"></div>
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
-        <div style="width:46px;height:46px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:18px">${(name[0]||'C').toUpperCase()}</div>
+        ${window.ruAvatarUrl?`<img src="${window.ruAvatarUrl}" style="width:46px;height:46px;border-radius:50%;object-fit:cover">`:`<div style="width:46px;height:46px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:18px">${(name[0]||'C').toUpperCase()}</div>`}
         <div style="min-width:0">
           <div style="font-size:15px;font-weight:700;color:var(--white)">${name}</div>
           <div style="font-size:11px;color:var(--mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${email}</div>
           <div style="font-size:10px;color:var(--red);margin-top:2px">Creator account</div>
         </div>
       </div>
+      <button class="profile-menu-item" onclick="openEditProfile()">
+        ✏️ Edit profile
+        <span style="display:block;font-size:10px;color:var(--mid);font-weight:400;margin-top:2px">Change your name and profile photo.</span>
+      </button>
       <button class="profile-menu-item" onclick="ruRefreshData()">
         ↻ Refresh data
         <span style="display:block;font-size:10px;color:var(--mid);font-weight:400;margin-top:2px">Reloads the latest version. Use this if something looks out of date.</span>
@@ -822,6 +826,86 @@ function openProfileMenu(){
   m.style.display='flex';
 }
 function closeProfileMenu(){const m=document.getElementById('ruProfileMenu');if(m)m.style.display='none';}
+
+// Render an avatar: a real photo if the profile has one, else an initials circle.
+// `prof` may be a profiles row ({display_name,username,avatar_url}) or null.
+function avatarHtml(prof, name, size){
+  size=size||38;
+  const url=prof&&prof.avatar_url;
+  const label=initials(name||(prof&&(prof.display_name||prof.username))||'?');
+  if(url){
+    return `<img src="${url}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="lazy">`;
+  }
+  return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:${Math.round(size*0.36)}px;flex-shrink:0">${label}</div>`;
+}
+
+// Edit profile: change display name and upload a profile photo.
+function openEditProfile(){
+  closeProfileMenu();
+  const name=window.ruName||'';
+  let m=document.getElementById('ruEditProfile');
+  if(!m){m=document.createElement('div');m.id='ruEditProfile';m.className='modal-bg';m.onclick=function(e){if(e.target===m)m.style.display='none';};document.body.appendChild(m);}
+  const cur=window.ruAvatarUrl;
+  m.innerHTML=`
+    <div class="modal" style="text-align:left">
+      <div class="modal-handle"></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white);margin-bottom:14px">Edit Profile</div>
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+        <div id="epAvatarPreview">${cur?`<img src="${cur}" style="width:64px;height:64px;border-radius:50%;object-fit:cover">`:`<div style="width:64px;height:64px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:24px">${initials(name)}</div>`}</div>
+        <div style="flex:1">
+          <label style="font-size:12px;color:var(--mid)">Profile photo</label>
+          <input id="epPhoto" type="file" accept="image/*" style="display:block;margin-top:6px;color:var(--lighter);font-size:12px;width:100%">
+        </div>
+      </div>
+      <label style="font-size:12px;color:var(--mid)">Display name</label>
+      <input id="epName" type="text" value="${(name||'').replace(/"/g,'&quot;')}" placeholder="Your name" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:12px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:6px;box-sizing:border-box">
+      <div id="epMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
+      <button id="epSaveBtn" onclick="saveProfile()" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">Save</button>
+      <button onclick="document.getElementById('ruEditProfile').style.display='none'" style="width:100%;background:transparent;color:var(--mid);border:none;padding:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:4px">Cancel</button>
+    </div>`;
+  m.style.display='flex';
+}
+
+async function saveProfile(){
+  const db=window.ruDB; if(!db){alert('Not connected.');return;}
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  const nameInput=document.getElementById('epName');
+  const photoInput=document.getElementById('epPhoto');
+  const msg=document.getElementById('epMsg');
+  const btn=document.getElementById('epSaveBtn');
+  const newName=(nameInput&&nameInput.value.trim())||'';
+  if(!newName){msg.textContent='Please enter a display name.';return;}
+  btn.disabled=true;btn.textContent='Saving…';msg.textContent='';
+  let avatarUrl=window.ruAvatarUrl||null;
+  try{
+    const file=photoInput&&photoInput.files&&photoInput.files[0];
+    if(file){
+      const ext=(file.name.split('.').pop()||'jpg').toLowerCase();
+      const path='avatars/'+user.id+'.'+ext;
+      const up=await db.storage.from('reels').upload(path,file,{upsert:true});
+      if(up.error)throw up.error;
+      const pub=db.storage.from('reels').getPublicUrl(path);
+      // cache-bust so a replaced photo shows immediately
+      avatarUrl=pub.data.publicUrl+'?v='+Date.now();
+    }
+    // Update the profiles row (this is what the feed/comments read).
+    const upd=await db.from('profiles').update({display_name:newName,avatar_url:avatarUrl}).eq('id',user.id);
+    if(upd.error)throw upd.error;
+    // Keep auth metadata in sync too.
+    await db.auth.updateUser({data:{display_name:newName}});
+    window.ruName=newName; window.ruAvatarUrl=avatarUrl;
+    try{ if(state&&state.users&&state.users.me){state.users.me.name=newName;saveState();} }catch(e){}
+    const em=document.getElementById('ruEditProfile'); if(em)em.style.display='none';
+    if(typeof loadReelsFromDB==='function')loadReelsFromDB();
+    render();
+    alert('Profile updated!');
+  }catch(e){
+    console.log('saveProfile error:',e);
+    msg.textContent='Could not save: '+(e&&e.message||e);
+    btn.disabled=false;btn.textContent='Save';
+  }
+}
 
 function saveState(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch(e){}}
 function resetData(){state=JSON.parse(JSON.stringify(DEFAULT_STATE));saveState();closeAdmin();render();}
@@ -1790,7 +1874,76 @@ async function loadInbox(){
 }
 
 /* ===== EVENTS ===== */
+// "Coming Soon" screen for the Events tab during soft launch. Shows the
+// roadmap of fight features and a CLEARLY-LABELED, non-interactive preview so
+// users can see what's coming without mistaking it for a working feature.
+function renderEventsComingSoon(){
+  return `
+    <div class="nav-bar"><div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="setTab('inbox')">🔔<div class="nav-dot"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div></div>
+    <div class="inner-scroll">
+      <div style="padding:24px 18px 8px;text-align:center">
+        <div style="font-size:40px;margin-bottom:8px">🥊</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:30px;letter-spacing:1px;color:var(--white);line-height:1">Sanctioned Events<br>Coming Soon</div>
+        <div style="font-size:13px;color:var(--light);line-height:1.6;margin-top:12px;max-width:340px;margin-left:auto;margin-right:auto">
+          RoundUp is starting as a place for Tulsa's amateur boxing community to post, connect, and follow each other. Live events are on the way — we're building them carefully and working toward USA Boxing LBC #27 sanctioning so they're done right.
+        </div>
+      </div>
+
+      <div style="padding:14px 18px 4px"><div style="font-size:10px;color:var(--gold);letter-spacing:1.5px;text-transform:uppercase;font-weight:600">What's coming to Events</div></div>
+      <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px">
+        ${[
+          ['🎟','Event tickets','Buy tickets to local fight cards right in the app, with reserved and ringside seating.'],
+          ['📋','Fight cards','Gyms and fighters build sanctioned cards — see the matchups, weights, and bout order.'],
+          ['🥊','Fighter profiles','Real verified fighter pages with records, rankings, and upcoming bouts.'],
+          ['⚖','Official booking','Referees, judges, and physicians get booked and confirmed for each event.'],
+        ].map(([ic,t,d])=>`
+          <div style="display:flex;gap:12px;align-items:flex-start;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:12px 14px">
+            <span style="font-size:18px;flex-shrink:0">${ic}</span>
+            <div><div style="font-size:13px;font-weight:600;color:var(--white);margin-bottom:2px">${t}</div><div style="font-size:11px;color:var(--mid);line-height:1.5">${d}</div></div>
+          </div>`).join('')}
+      </div>
+
+      <!-- Labeled preview mockup -->
+      <div style="padding:18px 18px 4px"><div style="font-size:10px;color:var(--mid);letter-spacing:1.5px;text-transform:uppercase;font-weight:600">Sneak peek</div></div>
+      <div style="padding:0 18px">
+        <div style="position:relative;border:1px solid var(--dark4);border-radius:var(--r);overflow:hidden;opacity:.85">
+          <div style="position:absolute;top:10px;right:10px;z-index:2;background:rgba(0,0,0,.7);color:var(--gold);font-size:9px;font-weight:700;letter-spacing:1px;padding:4px 9px;border-radius:10px;text-transform:uppercase">Preview · Coming soon</div>
+          <div style="background:linear-gradient(135deg,#2d0a00,#1a0000);padding:14px 16px">
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px;color:#fff">Fight Night Tulsa · Vol. 1</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.6);font-family:'DM Mono',monospace">SAT · 7:00 PM · Tulsa, OK</div>
+          </div>
+          <div style="padding:14px 16px;background:var(--dark2)">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+              <div style="flex:1;display:flex;align-items:center;gap:8px">
+                <div style="width:38px;height:38px;border-radius:50%;background:rgba(232,37,26,.15);color:var(--red);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:14px">MW</div>
+                <div><div style="font-size:12px;font-weight:600;color:#fff">Fighter A</div><div style="font-size:10px;color:var(--mid);font-family:'DM Mono',monospace">5-1-0</div></div>
+              </div>
+              <div style="font-family:'Bebas Neue',sans-serif;font-size:15px;color:var(--mid)">VS</div>
+              <div style="flex:1;display:flex;align-items:center;gap:8px;flex-direction:row-reverse;text-align:right">
+                <div style="width:38px;height:38px;border-radius:50%;background:rgba(42,127,232,.15);color:var(--blue);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:14px">JT</div>
+                <div><div style="font-size:12px;font-weight:600;color:#fff">Fighter B</div><div style="font-size:10px;color:var(--mid);font-family:'DM Mono',monospace">4-2-0</div></div>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid var(--dark3);font-size:11px;color:var(--mid)"><span>Welterweight · 147 lbs</span><span style="color:var(--green)">✓ Sanctioned</span></div>
+          </div>
+          <div style="background:var(--dark3);padding:10px 16px;text-align:center;font-size:11px;color:var(--mid)">🎟 Tickets · 📍 Venue details · Full card — all coming soon</div>
+        </div>
+        <div style="font-size:10px;color:var(--mid);text-align:center;margin-top:8px;line-height:1.5">This is a preview of a future feature, not a real event. No live events are scheduled yet.</div>
+      </div>
+
+      <div style="padding:18px 18px;text-align:center">
+        <div style="font-size:12px;color:var(--light);line-height:1.6">In the meantime — post reels, follow people, and chat. That's all live now.</div>
+        <button class="btn-primary" style="margin-top:10px;padding:11px 22px" onclick="setTab('reels')">Go to Reels</button>
+      </div>
+      <div class="pb-safe"></div>
+    </div>`;
+}
 function renderEvents(role){
+  // Everyone is a Creator during the soft launch. Show the "coming soon"
+  // roadmap + a clearly-labeled preview of what sanctioned events will look like.
+  if(role==='creator'||!ROLE_PROFILES[role]?.userId){
+    return renderEventsComingSoon();
+  }
   let evts=state.events;
   if(role==='creator'||!ROLE_PROFILES[role]?.userId)evts=evts.filter(e=>e.status==='published');
   if(role==='gym'){evts=evts.filter(e=>e.hostGym===ROLE_PROFILES[role].userId);}
@@ -2737,14 +2890,14 @@ function renderCreatorProfile(){
       </div>
 
       <!-- ══ CREDENTIAL UNLOCKS (moved from creator home) ══ -->
-      <div class="sec-head" style="margin-top:14px"><div class="sec-title">Unlock Features</div></div>
+      <div class="sec-head" style="margin-top:14px"><div class="sec-title">More Roles — Coming Soon</div></div>
       <div style="padding:0 18px;margin-bottom:4px;font-size:11px;color:var(--mid);line-height:1.5">
-        Verify your credentials to unlock additional features. Everyone on RoundUp is a creator by default — credentials expand what you can do.
+        Everyone starts as a Creator. Fighter, Gym, Official, and Sponsor roles are on the way — they'll unlock once RoundUp completes licensing and verification with USA Boxing LBC #27. Here's a preview of what each will be able to do.
       </div>
 
       <div style="background:rgba(29,184,122,.06);border:1px solid rgba(29,184,122,.15);border-radius:var(--r);margin:0 18px 10px;padding:11px 14px">
         <div style="font-size:12px;font-weight:600;color:var(--green);margin-bottom:4px">✓ You're a Creator — post and grow freely</div>
-        <div style="font-size:11px;color:var(--mid);line-height:1.5">Post reels, follow fighters and gyms, and build your following right now. Paid features (subscriptions &amp; earnings) open once platform licensing is complete.</div>
+        <div style="font-size:11px;color:var(--mid);line-height:1.5">Post reels, follow people, comment, like, and chat — all live right now. The roles below open in a future update.</div>
       </div>
 
       <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
@@ -2764,7 +2917,7 @@ function renderCreatorProfile(){
                 <span style="font-size:13px;font-weight:600;color:${active?u.color:'var(--white)'}">${u.label}</span>
                 ${active?`<span style="font-size:9px;color:${u.color};font-weight:600">✓ Unlocked</span>`:''}
               </div>
-              ${active?'':`<button onclick="openCredentialUnlock('${u.id}')" style="background:${u.color};color:#fff;border:none;padding:5px 12px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Unlock →</button>`}
+              ${active?'':`<span style="background:var(--dark4);color:var(--mid);padding:5px 12px;border-radius:10px;font-size:10px;font-weight:600;font-family:'DM Sans',sans-serif">Coming soon</span>`}
             </div>
             <div style="font-size:11px;color:var(--mid);line-height:1.3">${u.tagline}</div>
             ${!active&&u.blocked?`<div style="font-size:10px;color:var(--red);margin-top:3px">⚠ ${u.blocked}</div>`:''}
@@ -6341,7 +6494,7 @@ function renderReelsFeed(role){
           return `
           <div style="background:var(--dark2);border-bottom:1px solid var(--dark3);padding:14px 18px">
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-              <div style="width:38px;height:38px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:14px;flex-shrink:0">${initials(name)}</div>
+              ${avatarHtml(prof,name,38)}
               <div style="flex:1;min-width:0">
                 <div style="font-size:13px;font-weight:600;color:var(--white)">${name}</div>
                 <div style="font-size:10px;color:var(--mid)">${timeAgo(r.created_at)}</div>
@@ -7530,6 +7683,15 @@ render();
       var meta=res.data.user.user_metadata||{};
       window.ruName=meta.display_name||meta.username||'';
       window.ruUsername=meta.username||'';
+      // Load the saved profile photo (if any) so it shows after refresh.
+      db.from('profiles').select('display_name,avatar_url').eq('id',res.data.user.id).limit(1).then(function(pr){
+        var row=pr&&pr.data&&pr.data[0];
+        if(row){
+          if(row.avatar_url)window.ruAvatarUrl=row.avatar_url;
+          if(row.display_name)window.ruName=row.display_name;
+          if(typeof render==='function')render();
+        }
+      });
       // Push the real name into local state so the UI shows it everywhere.
       try{
         if(window.ruName && state && state.users && state.users.me){
