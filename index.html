@@ -546,7 +546,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
       <button id="ruLoginBtn" class="ru-auth-btn">Log in</button>
       <div style="text-align:center;margin-top:10px"><span onclick="ruForgotPassword()" style="font-size:12px;color:var(--mid);cursor:pointer;text-decoration:underline">Forgot password?</span></div>
       <div class="ru-auth-switch">New here? <button onclick="ruShow('signup')">Create an account</button></div>
-      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v8 · loading…</div>
+      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v9 · loading…</div>
     </div>
 
     <!-- SIGNUP -->
@@ -571,7 +571,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
   (function(){
     try{
       var t=document.getElementById('ruVersionTag');
-      if(t)t.textContent='build v8 · JS OK';
+      if(t)t.textContent='build v9 · JS OK';
     }catch(e){}
     window.addEventListener('error',function(ev){
       var t=document.getElementById('ruVersionTag');
@@ -1169,10 +1169,73 @@ async function loadGymPage(gymId){
     if(state.viewGym){
       const pr=await db.from('profiles').select('id,display_name,username,avatar_url').eq('id',state.viewGym.owner_id).limit(1);
       state.viewGymOwner=(pr.data&&pr.data[0])||null;
+      // Load roster: approved (public) + pending (owner sees these).
+      const mem=await db.from('gym_members').select('id,user_id,status').eq('gym_id',gymId);
+      const rows=mem.data||[];
+      const ids=[...new Set(rows.map(r=>r.user_id))];
+      let pmap={};
+      if(ids.length){
+        const pp=await db.from('profiles').select('id,display_name,username,avatar_url,role_info').in('id',ids);
+        (pp.data||[]).forEach(p=>{pmap[p.id]=p;});
+      }
+      const withProf=rows.map(r=>({...r,profile:pmap[r.user_id]||null}));
+      state.viewGymMembers={
+        approved:withProf.filter(r=>r.status==='approved'),
+        pending:withProf.filter(r=>r.status==='pending')
+      };
     }
   }catch(e){console.log('loadGymPage error:',e&&e.message);}
   state.viewGymLoading=false;
   if(state.currentScreen==='gym_page'&&state.drilldown===gymId)render();
+}
+
+// Fighter requests to join a gym.
+async function requestJoinGym(gymId){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  try{
+    const {error}=await db.from('gym_members').insert({gym_id:gymId,user_id:user.id,status:'pending'});
+    if(error)throw error;
+    await loadGymPage(gymId);
+    alert('Request sent! The gym owner will review it.');
+  }catch(e){
+    console.log('requestJoinGym error:',e);
+    alert('Could not send request: '+(e&&e.message||e));
+  }
+}
+
+// Fighter withdraws their request / leaves the gym.
+async function withdrawGymRequest(gymId){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user)return;
+  if(!confirm('Withdraw from this gym?'))return;
+  try{
+    const {error}=await db.from('gym_members').delete().eq('gym_id',gymId).eq('user_id',user.id);
+    if(error)throw error;
+    await loadGymPage(gymId);
+  }catch(e){alert('Could not withdraw: '+(e&&e.message||e));}
+}
+
+// Owner approves a pending member.
+async function approveGymMember(memberId, gymId){
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {error}=await db.from('gym_members').update({status:'approved'}).eq('id',memberId);
+    if(error)throw error;
+    await loadGymPage(gymId);
+  }catch(e){alert('Could not approve: '+(e&&e.message||e));}
+}
+
+// Owner declines a request or removes a member.
+async function declineGymMember(memberId, gymId){
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {error}=await db.from('gym_members').delete().eq('id',memberId);
+    if(error)throw error;
+    await loadGymPage(gymId);
+  }catch(e){alert('Could not update: '+(e&&e.message||e));}
 }
 
 function renderGymPage(){
@@ -1210,9 +1273,57 @@ function renderGymPage(){
       </div>
 
       <div class="sec-head"><div class="sec-title">Roster</div></div>
-      <div style="margin:0 18px 18px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:18px;text-align:center">
-        <div style="font-size:22px;margin-bottom:6px">🥊</div>
-        <div style="font-size:12px;color:var(--mid);line-height:1.5">Fighter roster is coming in the next update. Fighters will be able to request to join, and ${isOwner?'you':'the gym owner'} will approve them — so the roster is always real.</div>
+      <div style="margin:0 18px 18px">
+        ${(()=>{
+          const members=state.viewGymMembers||{approved:[],pending:[]};
+          const myId2=window.ruUserId||null;
+          const myMembership=(members.approved.concat(members.pending)).find(m=>m.user_id===myId2);
+          let out='';
+          // Join button for non-owners who don't already have a membership/request.
+          if(!isOwner && myId2){
+            if(!myMembership){
+              out+=`<button onclick="requestJoinGym('${g.id}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:11px;border-radius:var(--r);font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;margin-bottom:10px">Request to join this gym</button>`;
+            }else if(myMembership.status==='pending'){
+              out+=`<div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.25);border-radius:var(--r);padding:11px 14px;font-size:12px;color:var(--gold);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center"><span>⏳ Request pending — waiting for the gym to approve</span><button onclick="withdrawGymRequest('${g.id}')" style="background:transparent;border:none;color:var(--mid);font-size:11px;cursor:pointer;text-decoration:underline">Withdraw</button></div>`;
+            }else if(myMembership.status==='approved'){
+              out+=`<div style="background:rgba(29,184,122,.08);border:1px solid rgba(29,184,122,.25);border-radius:var(--r);padding:11px 14px;font-size:12px;color:var(--green);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center"><span>✓ You're a member of this gym</span><button onclick="withdrawGymRequest('${g.id}')" style="background:transparent;border:none;color:var(--mid);font-size:11px;cursor:pointer;text-decoration:underline">Leave</button></div>`;
+            }
+          }
+          // Owner: pending requests to approve/decline.
+          if(isOwner && members.pending.length>0){
+            out+=`<div style="font-size:11px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Pending requests (${members.pending.length})</div>`;
+            out+=members.pending.map(m=>{
+              const nm=(m.profile&&(m.profile.display_name||m.profile.username))||'Fighter';
+              return `<div style="display:flex;align-items:center;gap:10px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
+                ${avatarHtml(m.profile,nm,38)}
+                <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${nm}</div><div style="font-size:10px;color:var(--mid)">wants to join</div></div>
+                <button onclick="approveGymMember('${m.id}','${g.id}')" style="background:var(--green);color:#fff;border:none;padding:6px 12px;border-radius:9px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Approve</button>
+                <button onclick="declineGymMember('${m.id}','${g.id}')" style="background:transparent;border:1px solid var(--dark5);color:var(--mid);padding:6px 10px;border-radius:9px;font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif">Decline</button>
+              </div>`;
+            }).join('');
+          }
+          // Approved roster (public).
+          if(members.approved.length>0){
+            out+=`<div style="font-size:11px;color:var(--mid);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin:6px 0">Fighters (${members.approved.length})</div>`;
+            out+=members.approved.map(m=>{
+              const nm=(m.profile&&(m.profile.display_name||m.profile.username))||'Fighter';
+              const info=(m.profile&&m.profile.role_info)||{};
+              const sub=[info.sport,info.weight?info.weight+' lbs':''].filter(Boolean).join(' · ');
+              return `<div onclick="openUserProfile('${m.user_id}')" style="display:flex;align-items:center;gap:10px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;cursor:pointer">
+                ${avatarHtml(m.profile,nm,38)}
+                <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${nm}</div><div style="font-size:10px;color:var(--mid)">${escapeHtml(sub||'Fighter')}</div></div>
+                ${isOwner?`<button onclick="event.stopPropagation();declineGymMember('${m.id}','${g.id}')" style="background:transparent;border:none;color:var(--mid);font-size:11px;cursor:pointer">Remove</button>`:'<span style="color:var(--mid);font-size:16px">›</span>'}
+              </div>`;
+            }).join('');
+          }
+          if(members.approved.length===0 && !(isOwner&&members.pending.length>0) && (isOwner||myMembership)){
+            out+=`<div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:22px;margin-bottom:6px">🥊</div><div style="font-size:12px;color:var(--mid);line-height:1.5">No fighters on the roster yet.${isOwner?' When fighters request to join, you can approve them here.':''}</div></div>`;
+          }
+          if(!out){
+            out=`<div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:22px;margin-bottom:6px">🥊</div><div style="font-size:12px;color:var(--mid);line-height:1.5">No fighters on the roster yet.</div></div>`;
+          }
+          return out;
+        })()}
       </div>
       <div class="pb-safe"></div>
     </div>`;
@@ -3360,48 +3471,6 @@ function renderCreatorProfile(){
         <button onclick="openGymForm()" style="background:var(--dark3);border:1px dashed var(--dark5);color:var(--lighter);padding:11px;border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">+ Create a gym page</button>
       </div>
 
-      <!-- ── MY FIGHTERS ── -->
-      ${subFighters.length>0?`
-      <div class="sec-head"><div class="sec-title">My Fighters</div><div class="sec-link" onclick="setTab('find')">Find more →</div></div>
-      <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
-        ${subFighters.map(sf=>{const f=state.users[sf.id];if(!f)return '';return `
-          <div style="background:var(--dark2);border:1px solid ${sf.tier==='ringside'?'rgba(232,37,26,.3)':sf.tier==='corner'?'rgba(245,166,35,.3)':'var(--dark4)'};border-radius:var(--r);padding:11px 14px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="openUserProfile('${f.id}')">
-            <div style="width:40px;height:40px;border-radius:50%;background:${avatarBg(f.color)};color:${avatarColor(f.color)};display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:14px">${f.avatar}</div>
-            <div style="flex:1"><div style="font-size:13px;font-weight:500;color:var(--white)">${f.name}</div><div style="font-size:11px;color:var(--mid)">${f.weight} · ${f.record.w}-${f.record.l}</div></div>
-            <div style="text-align:right">
-              <div style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:10px;background:${sf.tier==='ringside'?'rgba(232,37,26,.12)':'rgba(245,166,35,.12)'};color:${sf.tier==='ringside'?'var(--red)':'var(--gold)'}">${sf.tier==='ringside'?'🔥 Ringside':'⭐ Corner'}</div>
-              <div style="font-size:9px;color:var(--mid);margin-top:2px">$${sf.tier==='ringside'?'14.99':sf.tier==='corner'?'4.99':'0'}/mo</div>
-            </div>
-          </div>`;}).join('')}
-      </div>`:`
-      <div style="padding:0 18px 14px"><div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:16px;text-align:center">
-        <div style="font-size:22px;margin-bottom:6px">👊</div>
-        <div style="font-size:13px;font-weight:500;color:var(--white);margin-bottom:4px">Subscribe to fighters</div>
-        <div style="font-size:11px;color:var(--mid);margin-bottom:12px;line-height:1.5">Corner $4.99/mo · Ringside $14.99/mo · Discounts on tickets included</div>
-        <button class="btn-primary" onclick="setTab('find')">Browse Fighters</button>
-      </div></div>`}
-
-      <!-- ── MY GYMS ── -->
-      ${subGyms.length>0?`
-      <div class="sec-head"><div class="sec-title">My Gyms</div><div class="sec-link" onclick="setTab('find')">Find more →</div></div>
-      <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
-        ${subGyms.map(sg=>{const g=state.users[sg.id];if(!g)return '';const t=GYM_SUB_TIERS[sg.tier];const tierColors={gym_follow:'var(--blue)',gym_corner:'var(--gold)',gym_insider:'var(--purple)',gym_vip:'var(--red)'};const tierBg={gym_follow:'rgba(42,127,232,.08)',gym_corner:'rgba(245,166,35,.08)',gym_insider:'rgba(127,119,221,.08)',gym_vip:'rgba(232,37,26,.08)'};return `
-          <div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:11px 14px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="openUserProfile('${g.id}')">
-            <div style="width:40px;height:40px;border-radius:10px;background:${avatarBg(g.color)};color:${avatarColor(g.color)};display:flex;align-items:center;justify-content:center;font-size:18px">${g.avatar}</div>
-            <div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--white)">${g.name}</div><div style="font-size:11px;color:var(--mid)">${g.location}</div></div>
-            <div style="text-align:right">
-              <div style="font-size:10px;font-weight:600;padding:3px 8px;border-radius:10px;background:${tierBg[sg.tier]||'var(--dark3)'};color:${tierColors[sg.tier]||'var(--mid)'}">${t?t.icon+' '+t.name:'Following'}</div>
-              <div style="font-size:9px;color:var(--mid);margin-top:2px">${t&&t.price>0?'$'+t.price.toFixed(2)+'/mo':'Free'}</div>
-            </div>
-          </div>`;}).join('')}
-      </div>`:`
-      <div style="padding:0 18px 14px"><div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:16px;text-align:center">
-        <div style="font-size:22px;margin-bottom:6px">🏋</div>
-        <div style="font-size:13px;font-weight:500;color:var(--white);margin-bottom:4px">Follow a gym</div>
-        <div style="font-size:11px;color:var(--mid);margin-bottom:12px;line-height:1.5">Free to follow · Subscribe from $3.99/mo for early tickets and behind-the-scenes access</div>
-        <button class="btn-primary" onclick="setTab('find')">Browse Gyms</button>
-      </div></div>`}
-
       <!-- ── MY TICKETS ── -->
       ${myTickets.length>0?`
       <div class="sec-head"><div class="sec-title">My Tickets</div></div>
@@ -3663,7 +3732,32 @@ function renderProfileDetail(){
         <div style="font-size:10px;color:var(--mid);padding:8px 0 4px;line-height:1.4">⏳ Self-listed — not verified by RoundUp. Real credentials required when events launch.</div>
       </div>`:''}
 
-      <!-- Subscription preview placeholder (Stage D will fill this in) -->
+      <!-- Subscription preview — clearly labeled, not functional -->
+      ${!isMe?`
+      <div class="sec-head"><div class="sec-title">Support ${name.split(' ')[0]}</div></div>
+      <div style="margin:0 18px 8px;position:relative;border:1px dashed var(--dark5);border-radius:var(--r);overflow:hidden;opacity:.9">
+        <div style="position:absolute;top:10px;right:10px;z-index:2;background:rgba(0,0,0,.7);color:var(--gold);font-size:9px;font-weight:700;letter-spacing:1px;padding:4px 9px;border-radius:10px;text-transform:uppercase">Preview · Coming soon</div>
+        <div style="padding:16px 14px">
+          <div style="font-size:11px;color:var(--mid);line-height:1.5;margin-bottom:12px">When RoundUp launches paid features, you'll be able to subscribe to support ${p.role==='gym'?'this gym':name.split(' ')[0]} and unlock perks. This is a preview — nothing is active yet and no payments are taken.</div>
+          ${(p.role==='fighter'||!p.role)?`
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center;background:var(--dark2);border:1px solid var(--dark4);border-radius:10px;padding:11px 13px">
+              <div><div style="font-size:12px;font-weight:600;color:var(--white)">👊 Corner</div><div style="font-size:10px;color:var(--mid)">Exclusive posts & updates</div></div>
+              <div style="font-size:12px;color:var(--mid)">$4.99/mo</div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;background:var(--dark2);border:1px solid var(--dark4);border-radius:10px;padding:11px 13px">
+              <div><div style="font-size:12px;font-weight:600;color:var(--white)">🥊 Ringside</div><div style="font-size:10px;color:var(--mid)">All Corner perks + ticket discounts</div></div>
+              <div style="font-size:12px;color:var(--mid)">$14.99/mo</div>
+            </div>
+          </div>`:`
+          <div style="display:flex;justify-content:space-between;align-items:center;background:var(--dark2);border:1px solid var(--dark4);border-radius:10px;padding:11px 13px">
+            <div><div style="font-size:12px;font-weight:600;color:var(--white)">⭐ Supporter</div><div style="font-size:10px;color:var(--mid)">Early news & behind-the-scenes</div></div>
+            <div style="font-size:12px;color:var(--mid)">from $3.99/mo</div>
+          </div>`}
+          <button disabled style="width:100%;background:var(--dark3);color:var(--mid);border:none;padding:11px;border-radius:10px;font-size:12px;font-weight:600;margin-top:10px;cursor:not-allowed;font-family:'DM Sans',sans-serif">Subscriptions launch later — follow for now</button>
+        </div>
+      </div>`:''}
+
 
       <div class="sec-head"><div class="sec-title">Reels</div></div>
       ${reels.length===0
@@ -7797,30 +7891,6 @@ function openFindBout(){
       <div style="background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.15);border-radius:8px;padding:10px;font-size:11px;color:var(--lighter)">Your request goes to verified gyms and matchmakers in your area. <strong style="color:var(--gold)">USA Boxing requirement:</strong> matchmaker and promoter must be separate persons. Cross-gym matching available — if no opponent exists at your gym in your weight class, RoundUp will search the Oklahoma LBC fighter registry. Women fighters: RoundUp applies separate Appendix F weight classes and bout rules automatically.</div>
     </div>
   `,'Submit Request',()=>alert('Bout request submitted! Verified gyms and matchmakers in Tulsa will be notified.'));
-}
-
-// Fighter: Edit profile
-function openEditProfile(){
-  const me=state.users[ROLE_PROFILES[state.currentRole]?.userId];
-  if(!me)return;
-  openActionModal('Edit Profile',`
-    <div style="display:flex;flex-direction:column;gap:12px">
-      <div><div class="edit-label">Nickname / Alias</div><input class="edit-input" id="ep_aka" value="${me.aka||''}" placeholder="e.g. The Predator"></div>
-      <div><div class="edit-label">Gym</div><input class="edit-input" id="ep_gym" value="${me.gym||''}" placeholder="Gym name"></div>
-      <div><div class="edit-label">Location</div><input class="edit-input" id="ep_loc" value="${me.location||''}" placeholder="City, State"></div>
-      <div><div class="edit-label">Bio (shown on public profile)</div><input class="edit-input" id="ep_bio" placeholder="Short bio for fans..."></div>
-    </div>
-  `,'Save Changes',()=>{
-    const me2=state.users[ROLE_PROFILES[state.currentRole]?.userId];
-    if(me2){
-      const aka=document.getElementById('ep_aka')?.value;
-      const gym=document.getElementById('ep_gym')?.value;
-      const loc=document.getElementById('ep_loc')?.value;
-      if(aka)me2.aka=aka; if(gym)me2.gym=gym; if(loc)me2.location=loc;
-      saveState();render();
-    }
-    alert('Profile updated!');
-  });
 }
 
 // Fighter: Connect with payout method
