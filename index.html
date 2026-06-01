@@ -546,7 +546,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
       <button id="ruLoginBtn" class="ru-auth-btn">Log in</button>
       <div style="text-align:center;margin-top:10px"><span onclick="ruForgotPassword()" style="font-size:12px;color:var(--mid);cursor:pointer;text-decoration:underline">Forgot password?</span></div>
       <div class="ru-auth-switch">New here? <button onclick="ruShow('signup')">Create an account</button></div>
-      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v7 · loading…</div>
+      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v8 · loading…</div>
     </div>
 
     <!-- SIGNUP -->
@@ -571,7 +571,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
   (function(){
     try{
       var t=document.getElementById('ruVersionTag');
-      if(t)t.textContent='build v7 · JS OK';
+      if(t)t.textContent='build v8 · JS OK';
     }catch(e){}
     window.addEventListener('error',function(ev){
       var t=document.getElementById('ruVersionTag');
@@ -977,8 +977,8 @@ async function openRoleForm(roleId){
     const db=window.ruDB;
     if(db){
       try{
-        const {data}=await db.from('profiles').select('role_info').eq('role','gym').limit(200);
-        gymOpts=[...new Set((data||[]).map(r=>r.role_info&&r.role_info.name).filter(Boolean))];
+        const {data}=await db.from('gyms').select('name').limit(200);
+        gymOpts=[...new Set((data||[]).map(r=>r.name).filter(Boolean))];
       }catch(e){console.log('gym list error:',e&&e.message);}
     }
   }
@@ -1057,6 +1057,165 @@ async function clearRole(){
     window.ruRole=null; window.ruRoleInfo={};
     render();
   }catch(e){alert('Could not remove: '+(e&&e.message||e));}
+}
+
+// ===== Gyms as their own entity (Stage B) =====
+// Load the gyms owned by the current user (shown on the profile).
+async function loadMyGyms(){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user)return;
+  try{
+    const {data}=await db.from('gyms').select('*').eq('owner_id',user.id).order('created_at',{ascending:true});
+    state.myGyms=data||[];
+    if(state.currentTab==='profile')render();
+  }catch(e){console.log('loadMyGyms error:',e&&e.message);}
+}
+
+// Create or edit a gym page. Pass a gym id to edit, or nothing to create.
+async function openGymForm(gymId){
+  closeProfileMenu();
+  let gym={name:'',location:'',team:'',sports:''};
+  if(gymId){const g=(state.myGyms||[]).find(x=>x.id===gymId);if(g)gym=g;}
+  let m=document.getElementById('ruGymForm');
+  if(!m){m=document.createElement('div');m.id='ruGymForm';m.className='modal-bg';m.onclick=function(e){if(e.target===m)m.style.display='none';};document.body.appendChild(m);}
+  const sportOpts=['Boxing','MMA','Kickboxing','Muay Thai'];
+  m.innerHTML=`
+    <div class="modal" style="text-align:left;max-height:85vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white)">${gymId?'Edit Gym':'Create a Gym'}</div>
+      <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">🏋 This creates a gym page that you own and control. Self-listed for early access — not verified by RoundUp.</div>
+      <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">Gym name <span style="color:var(--red)">*</span></label>
+      <input id="gf_name" type="text" value="${(gym.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. HAC Boxing" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
+      <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">Location (city/area) <span style="color:var(--red)">*</span></label>
+      <input id="gf_location" type="text" value="${(gym.location||'').replace(/"/g,'&quot;')}" placeholder="Tulsa, OK" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
+      <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">Combat sports offered</label>
+      <select id="gf_sports" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
+        <option value="">— Select —</option>
+        ${sportOpts.map(o=>`<option value="${o}" ${gym.sports===o?'selected':''}>${o}</option>`).join('')}
+      </select>
+      <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">Team / about (optional)</label>
+      <input id="gf_team" type="text" value="${(gym.team||'').replace(/"/g,'&quot;')}" placeholder="A few words about the gym" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
+      <div id="gfMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
+      <button id="gfSaveBtn" onclick="saveGym('${gymId||''}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">${gymId?'Save changes':'Create gym'}</button>
+      ${gymId?`<button onclick="deleteGym('${gymId}')" style="width:100%;background:transparent;color:var(--red);border:none;padding:9px;font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:4px">Delete this gym</button>`:''}
+      <button onclick="document.getElementById('ruGymForm').style.display='none'" style="width:100%;background:transparent;color:var(--mid);border:none;padding:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:2px">Cancel</button>
+    </div>`;
+  m.style.display='flex';
+}
+
+async function saveGym(gymId){
+  const db=window.ruDB; if(!db){alert('Not connected.');return;}
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  const name=(document.getElementById('gf_name').value||'').trim();
+  const location=(document.getElementById('gf_location').value||'').trim();
+  const sports=(document.getElementById('gf_sports').value||'').trim();
+  const team=(document.getElementById('gf_team').value||'').trim();
+  const msg=document.getElementById('gfMsg');
+  const btn=document.getElementById('gfSaveBtn');
+  if(!name){msg.textContent='Please enter a gym name.';return;}
+  if(!location){msg.textContent='Please enter a location.';return;}
+  btn.disabled=true;btn.textContent='Saving…';
+  try{
+    if(gymId){
+      const {error}=await db.from('gyms').update({name:name,location:location,sports:sports,team:team}).eq('id',gymId);
+      if(error)throw error;
+    }else{
+      const {error}=await db.from('gyms').insert({owner_id:user.id,name:name,location:location,sports:sports,team:team});
+      if(error)throw error;
+    }
+    const gm=document.getElementById('ruGymForm'); if(gm)gm.style.display='none';
+    await loadMyGyms();
+    render();
+    alert('Gym saved!');
+  }catch(e){
+    console.log('saveGym error:',e);
+    msg.textContent='Could not save: '+(e&&e.message||e);
+    btn.disabled=false;btn.textContent=gymId?'Save changes':'Create gym';
+  }
+}
+
+async function deleteGym(gymId){
+  if(!confirm('Delete this gym page? This cannot be undone.'))return;
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {error}=await db.from('gyms').delete().eq('id',gymId);
+    if(error)throw error;
+    const gm=document.getElementById('ruGymForm'); if(gm)gm.style.display='none';
+    await loadMyGyms();
+    if(state.currentScreen==='gym_page')goBack();
+    render();
+  }catch(e){alert('Could not delete: '+(e&&e.message||e));}
+}
+
+// Open a gym's public page.
+function openGymPage(gymId){
+  state.currentScreen='gym_page';
+  state.drilldown=gymId;
+  state.viewGymId=null; state.viewGym=null;
+  saveState();render();
+  setTimeout(()=>loadGymPage(gymId),0);
+}
+
+async function loadGymPage(gymId){
+  const db=window.ruDB; if(!db||!gymId)return;
+  state.viewGymLoading=true;
+  try{
+    const g=await db.from('gyms').select('*').eq('id',gymId).limit(1);
+    state.viewGym=(g.data&&g.data[0])||null;
+    state.viewGymId=gymId;
+    // owner info
+    if(state.viewGym){
+      const pr=await db.from('profiles').select('id,display_name,username,avatar_url').eq('id',state.viewGym.owner_id).limit(1);
+      state.viewGymOwner=(pr.data&&pr.data[0])||null;
+    }
+  }catch(e){console.log('loadGymPage error:',e&&e.message);}
+  state.viewGymLoading=false;
+  if(state.currentScreen==='gym_page'&&state.drilldown===gymId)render();
+}
+
+function renderGymPage(){
+  const id=state.drilldown;
+  if(state.viewGymId!==id && !state.viewGymLoading){setTimeout(()=>loadGymPage(id),0);}
+  const g=(state.viewGymId===id)?state.viewGym:null;
+  const myId=window.ruUserId||null;
+
+  if(state.viewGymLoading && !g){
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Gym</div><div style="width:34px"></div></div><div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading gym…</div></div>`;
+  }
+  if(!g){
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Gym</div><div style="width:34px"></div></div><div class="empty"><div class="empty-icon">🏋</div><div class="empty-title">Gym not found</div></div>`;
+  }
+  const isOwner=(g.owner_id===myId);
+  const owner=state.viewGymOwner;
+  const ownerName=owner?(owner.display_name||owner.username||'Owner'):'Owner';
+
+  return `
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Gym</div><div style="width:34px"></div></div>
+    <div class="inner-scroll">
+      <div style="padding:24px 18px 16px;text-align:center;background:linear-gradient(180deg,rgba(245,166,35,.08),transparent)">
+        <div style="width:84px;height:84px;border-radius:18px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:38px;margin:0 auto 12px">🏋</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;color:var(--white);line-height:1">${escapeHtml(g.name)}</div>
+        <div style="font-size:13px;color:var(--lighter);margin-top:4px">📍 ${escapeHtml(g.location||'')}</div>
+        <div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:var(--dark3);padding:4px 12px;border-radius:12px"><span style="font-size:11px;font-weight:600;color:var(--gold);text-transform:uppercase;letter-spacing:.5px">Gym</span><span style="font-size:9px;color:var(--mid)">● self-listed</span></div>
+        ${isOwner?`<div style="margin-top:14px"><button onclick="openGymForm('${g.id}')" style="background:var(--dark3);color:var(--white);border:none;padding:9px 26px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Edit gym</button></div>`:''}
+      </div>
+
+      <div class="sec-head"><div class="sec-title">About</div></div>
+      <div style="margin:0 18px 8px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:4px 14px">
+        ${g.sports?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3)"><span style="font-size:12px;color:var(--mid)">Sports</span><span style="font-size:13px;color:var(--white);font-weight:500">${escapeHtml(g.sports)}</span></div>`:''}
+        ${g.team?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3)"><span style="font-size:12px;color:var(--mid)">Team</span><span style="font-size:13px;color:var(--white);font-weight:500">${escapeHtml(g.team)}</span></div>`:''}
+        <div style="display:flex;justify-content:space-between;padding:9px 0"><span style="font-size:12px;color:var(--mid)">Owner</span><span onclick="openUserProfile('${g.owner_id}')" style="font-size:13px;color:var(--gold);font-weight:500;cursor:pointer">${escapeHtml(ownerName)} ›</span></div>
+      </div>
+
+      <div class="sec-head"><div class="sec-title">Roster</div></div>
+      <div style="margin:0 18px 18px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:18px;text-align:center">
+        <div style="font-size:22px;margin-bottom:6px">🥊</div>
+        <div style="font-size:12px;color:var(--mid);line-height:1.5">Fighter roster is coming in the next update. Fighters will be able to request to join, and ${isOwner?'you':'the gym owner'} will approve them — so the roster is always real.</div>
+      </div>
+      <div class="pb-safe"></div>
+    </div>`;
 }
 
 function resetData(){state=JSON.parse(JSON.stringify(DEFAULT_STATE));saveState();closeAdmin();render();}
@@ -1404,6 +1563,8 @@ function render(){
     wrap.innerHTML=renderFighterDraftCardDetail(state.drilldown);
   }else if(state.currentScreen==='profile_detail'){
     wrap.innerHTML=renderProfileDetail();
+  }else if(state.currentScreen==='gym_page'){
+    wrap.innerHTML=renderGymPage();
   }else if(state.currentScreen==='event_detail'){
     wrap.innerHTML=renderEventDetail();
   }else{
@@ -1810,12 +1971,20 @@ function renderOfficialHome(){
 function loadDirectory(){
   const db=window.ruDB; if(!db)return;
   state.dirLoading=true;
+  // People with a self-listed role (excluding the old 'gym' role — gyms are
+  // now their own entity, loaded separately below).
   db.from('profiles').select('id,display_name,username,avatar_url,role,role_info').not('role','is',null).limit(500)
     .then(function(res){
-      state.directory=res.data||[];
+      state.directory=(res.data||[]).filter(p=>p.role!=='gym');
       state.dirLoading=false;
       if(state.currentTab==='find')render();
     }).catch(function(e){state.dirLoading=false;console.log('loadDirectory error:',e&&e.message);});
+  // Real gym entities.
+  db.from('gyms').select('id,name,location,sports,owner_id').limit(500)
+    .then(function(res){
+      state.dirGyms=res.data||[];
+      if(state.currentTab==='find')render();
+    }).catch(function(e){console.log('loadDirectory gyms error:',e&&e.message);});
 }
 
 function renderDirectory(){
@@ -1825,6 +1994,10 @@ function renderDirectory(){
   const filterMap={all:null,fighters:'fighter',gyms:'gym',coaches:'coach',officials:'official',sponsors:'sponsor'};
   const want=filterMap[filter];
   const list=want?all.filter(p=>p.role===want):all;
+  // Real gym entities (separate from people).
+  const gyms=state.dirGyms||[];
+  const showGyms=(filter==='all'||filter==='gyms');
+  const gymsToShow=showGyms?gyms:[];
 
   const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors']]
     .map(([f,lbl])=>`<div class="disco-chip ${filter===f?'active':''}" onclick="setFindFilter('${f}')">${lbl}</div>`).join('');
@@ -1833,10 +2006,15 @@ function renderDirectory(){
     <div style="background:rgba(245,166,35,.05);border-bottom:1px solid rgba(245,166,35,.12);padding:8px 18px;font-size:10px;color:var(--gold);line-height:1.4">⏳ Self-listed members · not yet verified by RoundUp</div>
     <div class="disco-tabs" style="margin-top:10px">${chips}</div>`;
 
-  if(state.dirLoading && all.length===0){
+  if(state.dirLoading && all.length===0 && gyms.length===0){
     return head+`<div class="empty" style="padding:40px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading members…</div></div>`;
   }
-  if(list.length===0){
+  // When the Gyms filter is on, the gyms list carries the content.
+  if(filter==='gyms'){
+    if(gymsToShow.length===0){
+      return head+`<div class="empty"><div class="empty-icon">🏋</div><div class="empty-title">No gyms yet</div><div class="empty-text">No gyms have been created yet. Create one from your Profile to be the first.</div><button class="empty-btn" onclick="setTab('profile')">Create a gym</button></div>`;
+    }
+  } else if(list.length===0 && gymsToShow.length===0){
     return head+`<div class="empty"><div class="empty-icon">🔎</div><div class="empty-title">Nobody here yet</div><div class="empty-text">No one has listed themselves${want?(' as a '+want):''} yet. Add your own role from your Profile to be the first.</div><button class="empty-btn" onclick="setTab('profile')">Set my role</button></div>`;
   }
 
@@ -1861,11 +2039,25 @@ function renderDirectory(){
       </div>`;
   };
 
+  const gymCard=(g)=>{
+    const sub=[g.location,g.sports].filter(Boolean).join(' · ');
+    return `
+      <div onclick="openGymPage('${g.id}')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
+        <div style="width:44px;height:44px;border-radius:12px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">🏋</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${escapeHtml(g.name)}</span><span style="font-size:9px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Gym</span></div>
+          <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(sub||'Self-listed gym')}</div>
+        </div>
+        <span style="color:var(--mid);font-size:16px">›</span>
+      </div>`;
+  };
+
   return `
     <div class="search-bar"><span style="font-size:14px">🔎</span><input class="search-input" placeholder="Browse RoundUp members..."></div>
     ${head}
     <div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px">
-      ${list.map(card).join('')}
+      ${gymsToShow.map(gymCard).join('')}
+      ${filter==='gyms'?'':list.map(card).join('')}
     </div>
     <div class="pb-safe"></div>`;
 }
@@ -3130,7 +3322,6 @@ function renderCreatorProfile(){
           const myRole=window.ruRole||null;
           const roles=[
             {id:'fighter',icon:'🥊',label:'Fighter',tagline:'List your height, weight, combat sport, and gym',color:'var(--red)',bg:'rgba(232,37,26,.06)',border:'rgba(232,37,26,.3)'},
-            {id:'gym',icon:'🏋',label:'Gym',tagline:'List your gym name, location, and team',color:'var(--gold)',bg:'rgba(245,166,35,.06)',border:'rgba(245,166,35,.3)'},
             {id:'coach',icon:'🩺',label:'Coach / Corner',tagline:'List your combat sport, specialty, and gym',color:'var(--purple)',bg:'rgba(127,119,221,.06)',border:'rgba(127,119,221,.3)'},
             {id:'official',icon:'⚖',label:'Official',tagline:'List your official type and combat sport',color:'var(--green)',bg:'rgba(29,184,122,.06)',border:'rgba(29,184,122,.3)'},
             {id:'sponsor',icon:'💼',label:'Sponsor',tagline:'List your brand and what you want to sponsor',color:'var(--blue)',bg:'rgba(42,127,232,.06)',border:'rgba(42,127,232,.3)'},
@@ -3152,6 +3343,21 @@ function renderCreatorProfile(){
           }).join('');
         })()}
         ${window.ruRole?`<button onclick="clearRole()" style="background:transparent;border:1px solid var(--dark5);color:var(--mid);padding:9px;border-radius:var(--r);font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif">Remove my self-listed role</button>`:''}
+      </div>
+
+      <!-- ── MY GYMS (gyms are their own pages, owned by you) ── -->
+      <div class="sec-head" style="margin-top:6px"><div class="sec-title">My Gyms</div></div>
+      <div style="padding:0 18px;margin-bottom:4px;font-size:11px;color:var(--mid);line-height:1.5">
+        A gym is its own page, separate from your personal profile. Create one and you're its owner — you control its info and (soon) its roster.
+      </div>
+      <div id="myGymsList" style="padding:0 18px;display:flex;flex-direction:column;gap:8px;margin-bottom:10px">
+        ${(state.myGyms||[]).map(g=>`
+          <div style="display:flex;align-items:center;gap:10px;background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.25);border-radius:var(--r);padding:11px 14px">
+            <span style="font-size:16px">🏋</span>
+            <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${escapeHtml(g.name)}</div><div style="font-size:11px;color:var(--mid)">${escapeHtml(g.location||'')}</div></div>
+            <button onclick="openGymPage('${g.id}')" style="background:transparent;border:1px solid var(--gold);color:var(--gold);padding:5px 12px;border-radius:10px;font-size:10px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Open</button>
+          </div>`).join('')}
+        <button onclick="openGymForm()" style="background:var(--dark3);border:1px dashed var(--dark5);color:var(--lighter);padding:11px;border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">+ Create a gym page</button>
       </div>
 
       <!-- ── MY FIGHTERS ── -->
@@ -7868,7 +8074,7 @@ function attachHandlers(){
     b.onclick=()=>{state.currentRole=b.dataset.role;state.currentScreen='main';state.drilldown=null;state.currentTab=ROLE_PROFILES[b.dataset.role].tabs[0];saveState();render();};
   });
 }
-function setTab(t){state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();if(t==='inbox'&&typeof loadInbox==='function')loadInbox();if(t==='find'&&typeof loadDirectory==='function')loadDirectory();}
+function setTab(t){state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();if(t==='inbox'&&typeof loadInbox==='function')loadInbox();if(t==='find'&&typeof loadDirectory==='function')loadDirectory();if(t==='profile'&&typeof loadMyGyms==='function')loadMyGyms();}
 function openConv(otherId){state.currentScreen='conversation';state.drilldown=otherId;state.dmThreadOtherId=null;state.dmThreadMsgs=[];render();setTimeout(()=>loadDMThread(otherId),0);}
 function openConversation(pid){openConv(pid);}
 function openUserProfile(id){state.currentScreen='profile_detail';state.drilldown=id;state.viewProfileId=null;state.viewProfile=null;state.viewProfileReels=[];saveState();render();setTimeout(()=>loadViewProfile(id),0);}
@@ -8087,6 +8293,7 @@ render();
           if(typeof render==='function')render();
         }
       }).catch(function(e){console.log('profile load skipped:',e&&e.message);});
+      if(typeof loadMyGyms==='function')setTimeout(loadMyGyms,100);
       // Push the real name into local state so the UI shows it everywhere.
       try{
         if(window.ruName && state && state.users && state.users.me){
