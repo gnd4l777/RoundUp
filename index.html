@@ -7782,14 +7782,22 @@ render();
   var loginForm=document.getElementById('ruLoginForm');
   var signupForm=document.getElementById('ruSignupForm');
 
-  // If the Supabase library didn't load (e.g. no internet in a local preview),
-  // don't trap the user behind a dead gate — show a clear message.
-  if(!window.supabase || !window.RU_SUPABASE_URL){
-    errBox.style.display='block';
-    errBox.textContent='Backend not reachable here. This works once the site is deployed online (Netlify). In a local/offline preview, sign-in is unavailable.';
-    return;
+  // The Supabase library (loaded from a CDN above) may not be ready the instant
+  // this runs. Instead of giving up and leaving dead buttons, wait briefly and
+  // retry. Only show the "offline" message after several failed attempts.
+  var _waits=0;
+  function bootWhenReady(){
+    if(window.supabase && window.RU_SUPABASE_URL){ startGate(); return; }
+    _waits++;
+    if(_waits>40){ // ~6 seconds of trying
+      if(errBox){errBox.style.display='block';errBox.textContent='Backend not reachable here. This works once the site is deployed online (Netlify). In a local/offline preview, sign-in is unavailable.';}
+      return;
+    }
+    setTimeout(bootWhenReady,150);
   }
+  bootWhenReady();
 
+  function startGate(){
   var db=window.supabase.createClient(window.RU_SUPABASE_URL, window.RU_SUPABASE_ANON);
   window.ruDB=db; // later stages (reels, chat) use this same client
 
@@ -7930,6 +7938,7 @@ render();
       }catch(e){}
     }
   });
+  } // end startGate
 })();
 
 
