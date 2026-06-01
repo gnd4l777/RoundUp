@@ -546,7 +546,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
       <button id="ruLoginBtn" class="ru-auth-btn">Log in</button>
       <div style="text-align:center;margin-top:10px"><span onclick="ruForgotPassword()" style="font-size:12px;color:var(--mid);cursor:pointer;text-decoration:underline">Forgot password?</span></div>
       <div class="ru-auth-switch">New here? <button onclick="ruShow('signup')">Create an account</button></div>
-      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v11 · loading…</div>
+      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v13 · loading…</div>
     </div>
 
     <!-- SIGNUP -->
@@ -571,7 +571,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
   (function(){
     try{
       var t=document.getElementById('ruVersionTag');
-      if(t)t.textContent='build v11 · JS OK';
+      if(t)t.textContent='build v13 · JS OK';
     }catch(e){}
     window.addEventListener('error',function(ev){
       var t=document.getElementById('ruVersionTag');
@@ -3882,8 +3882,10 @@ function renderProfileDetail(){
         ? `<div style="padding:0 18px 18px"><div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:24px;text-align:center"><div style="font-size:24px;margin-bottom:6px">🎬</div><div style="font-size:12px;color:var(--mid)">${isMe?'No reels posted yet.':name+' has not posted any reels yet.'}</div></div></div>`
         : `<div style="padding:0 18px 18px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px">
             ${reels.map(r=>{
-              const img=r.media_url?`<img src="${r.media_url}" style="width:100%;aspect-ratio:1;object-fit:cover;display:block" loading="lazy">`:`<div style="width:100%;aspect-ratio:1;background:var(--dark3);display:flex;align-items:center;justify-content:center;font-size:18px">🥊</div>`;
-              return `<div onclick="setTab('reels')" style="border-radius:6px;overflow:hidden;cursor:pointer;background:var(--dark3)">${img}</div>`;
+              const img=r.media_url?(r.media_type==='video'
+                ? `<video src="${r.media_url}#t=0.1" muted playsinline preload="metadata" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#000"></video><div style="position:absolute;top:4px;right:4px;font-size:11px">▶️</div>`
+                : `<img src="${r.media_url}" style="width:100%;aspect-ratio:1;object-fit:cover;display:block" loading="lazy">`):`<div style="width:100%;aspect-ratio:1;background:var(--dark3);display:flex;align-items:center;justify-content:center;font-size:18px">🥊</div>`;
+              return `<div onclick="setTab('reels')" style="position:relative;border-radius:6px;overflow:hidden;cursor:pointer;background:var(--dark3)">${img}</div>`;
             }).join('')}
           </div>`}
       <div class="pb-safe"></div>
@@ -3899,7 +3901,7 @@ async function loadViewProfile(id){
     state.viewProfile=(pr.data&&pr.data[0])||null;
     state.viewProfileId=id;
     // Their reels
-    const rr=await db.from('reels').select('id,caption,media_url,created_at').eq('author_id',id).order('created_at',{ascending:false}).limit(60);
+    const rr=await db.from('reels').select('id,caption,media_url,media_type,created_at').eq('author_id',id).order('created_at',{ascending:false}).limit(60);
     state.viewProfileReels=rr.data||[];
     // Followers count + whether I follow them
     const myId=window.ruUserId||null;
@@ -6186,7 +6188,9 @@ function renderCreatorHome(){
         ${reels.map(r=>{
           const prof=r.profiles||{};
           const nm=(prof.display_name||prof.username)||'Creator';
-          const img=r.media_url?`<img src="${r.media_url}" style="width:100%;height:96px;object-fit:cover;display:block" loading="lazy">`:`<div style="width:100%;height:96px;background:linear-gradient(135deg,#1a0000,#0d1a2d);display:flex;align-items:center;justify-content:center;font-size:24px">🥊</div>`;
+          const img=r.media_url?(r.media_type==='video'
+            ? `<video src="${r.media_url}#t=0.1" muted playsinline preload="metadata" style="width:100%;height:96px;object-fit:cover;display:block;background:#000"></video>`
+            : `<img src="${r.media_url}" style="width:100%;height:96px;object-fit:cover;display:block" loading="lazy">`):`<div style="width:100%;height:96px;background:linear-gradient(135deg,#1a0000,#0d1a2d);display:flex;align-items:center;justify-content:center;font-size:24px">🥊</div>`;
           return `
           <div onclick="setTab('reels')" style="min-width:150px;max-width:150px;flex-shrink:0;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);overflow:hidden;cursor:pointer">
             ${img}
@@ -7107,12 +7111,15 @@ async function submitReel(caption, file){
   try{
     if(file){
       const isImg=file.type&&file.type.indexOf('image/')===0;
-      const blob=isImg?await compressImage(file,1280,0.82):file;
-      const path=user.id+'/'+Date.now()+'.jpg';
-      const up=await db.storage.from('reels').upload(path,blob,{upsert:false,contentType:isImg?'image/jpeg':file.type});
+      const isVid=file.type&&file.type.indexOf('video/')===0;
+      let blob=file, ext='jpg', ctype=file.type;
+      if(isImg){ blob=await compressImage(file,1280,0.82); ext='jpg'; ctype='image/jpeg'; }
+      else if(isVid){ blob=file; ext=(file.name.split('.').pop()||'mp4').toLowerCase(); ctype=file.type||'video/mp4'; }
+      const path=user.id+'/'+Date.now()+'.'+ext;
+      const up=await db.storage.from('reels').upload(path,blob,{upsert:false,contentType:ctype});
       if(up.error)throw up.error;
       const pub=db.storage.from('reels').getPublicUrl(path);
-      media_url=pub.data.publicUrl; media_type='image';
+      media_url=pub.data.publicUrl; media_type=isVid?'video':'image';
     }
     const ins=await db.from('reels').insert({author_id:user.id,caption:caption,media_url:media_url,media_type:media_type});
     if(ins.error)throw ins.error;
@@ -7300,7 +7307,9 @@ function renderReelsFeed(role){
               </div>
               ${canDelete?`<button onclick="deleteReelDB('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:11px;color:var(--mid);font-family:'DM Sans',sans-serif">🗑 Delete</button>`:''}
             </div>
-            ${r.media_url?`<img src="${r.media_url}" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block" loading="lazy">`:''}
+            ${r.media_url?(r.media_type==='video'
+              ? `<video src="${r.media_url}" muted autoplay loop playsinline onclick="this.muted=!this.muted" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block;background:#000;cursor:pointer"></video><div style="font-size:10px;color:var(--mid);margin:-6px 0 10px;text-align:center">🔊 Tap video to unmute</div>`
+              : `<img src="${r.media_url}" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block" loading="lazy">`):''}
             ${r.caption?`<div style="font-size:13px;color:var(--lighter);line-height:1.5;margin-bottom:10px">${escapeHtml(r.caption)}</div>`:''}
             <div style="display:flex;gap:16px;align-items:center">
               <button id="like_${r.id}" onclick="toggleLike('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:${r.likedByMe?'var(--red)':'var(--light)'};font-family:'DM Sans',sans-serif">${r.likedByMe?'❤️':'🤍'} ${r.likeCount||0}</button>
@@ -7385,6 +7394,7 @@ function playReel(rid){
 // Post a new reel — opens a modal with caption + optional photo. Saves to
 // Supabase so the reel appears in everyone's shared feed.
 function openPostReel(){
+  window._ruRecordedFile=null;
   let m=document.getElementById('ruPostReel');
   if(!m){
     m=document.createElement('div');
@@ -7397,23 +7407,234 @@ function openPostReel(){
       <div class="modal-handle"></div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white);margin-bottom:14px">New Reel</div>
       <textarea id="reelCaption" placeholder="Write a caption…" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:12px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;min-height:90px;resize:vertical;box-sizing:border-box"></textarea>
-      <label style="display:block;margin-top:12px;font-size:12px;color:var(--mid)">Photo (optional)</label>
-      <input id="reelFile" type="file" accept="image/*" style="margin-top:6px;color:var(--lighter);font-size:12px;width:100%">
+      <label style="display:block;margin-top:12px;font-size:12px;color:var(--mid)">Add a photo or video</label>
+      <button onclick="openRecorder()" style="width:100%;background:var(--dark3);color:var(--white);border:1px solid var(--dark5);padding:11px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">🎥 Record a video</button>
+      <div style="text-align:center;font-size:11px;color:var(--mid);margin:8px 0">— or —</div>
+      <input id="reelFile" type="file" accept="image/*,video/*" onchange="checkReelFile()" style="margin-top:0;color:var(--lighter);font-size:12px;width:100%">
+      <div id="reelRecordedPreview" style="margin-top:10px"></div>
+      <div style="font-size:10px;color:var(--mid);margin-top:4px">Videos: up to 60 seconds, 50 MB max. They'll autoplay muted in the feed.</div>
       <div id="reelPostMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
       <button id="reelPostBtn" onclick="doPostReel()" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">Post Reel</button>
       <button onclick="closePostReel()" style="width:100%;background:transparent;color:var(--mid);border:none;padding:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:4px">Cancel</button>
     </div>`;
   m.style.display='flex';
 }
-function closePostReel(){const m=document.getElementById('ruPostReel');if(m)m.style.display='none';}
+function closePostReel(){const m=document.getElementById('ruPostReel');if(m)m.style.display='none';window._ruRecordedFile=null;}
+
+// Validate a chosen file the moment it's picked: videos must be <=60s and <=50MB.
+function checkReelFile(){
+  const fileInput=document.getElementById('reelFile');
+  const msg=document.getElementById('reelPostMsg');
+  const file=fileInput&&fileInput.files&&fileInput.files[0];
+  if(!file){if(msg)msg.textContent='';return;}
+  const isVideo=file.type&&file.type.indexOf('video/')===0;
+  if(isVideo){
+    if(file.size>50*1024*1024){
+      msg.style.color='var(--red)';
+      msg.textContent='That video is over 50 MB. Please trim it or pick a shorter clip.';
+      fileInput.value=''; return;
+    }
+    // Check duration
+    const url=URL.createObjectURL(file);
+    const v=document.createElement('video');
+    v.preload='metadata';
+    v.onloadedmetadata=function(){
+      URL.revokeObjectURL(url);
+      if(v.duration>61){
+        msg.style.color='var(--red)';
+        msg.textContent='That video is longer than 60 seconds. Please trim it down.';
+        fileInput.value='';
+      }else{
+        msg.style.color='var(--mid)';
+        msg.textContent='Video looks good ('+Math.round(v.duration)+'s).';
+      }
+    };
+    v.onerror=function(){URL.revokeObjectURL(url);};
+    v.src=url;
+  }else{
+    msg.style.color='var(--mid)';
+    msg.textContent='';
+  }
+}
+
+// ===== In-app video recorder =====
+// Records straight from the device camera (back camera by default, flippable),
+// auto-stops at 60s, lets the user review and use or retake. Produces a Blob
+// that doPostReel uploads. No heavy editing — recording is capped instead.
+window._ruRec = { stream:null, recorder:null, chunks:[], blob:null, facing:'environment', timer:null, seconds:0 };
+
+async function openRecorder(){
+  let m=document.getElementById('ruRecorder');
+  if(!m){m=document.createElement('div');m.id='ruRecorder';m.className='modal-bg';m.style.zIndex='3000';document.body.appendChild(m);}
+  m.innerHTML=`
+    <div class="modal" style="text-align:center;max-width:440px">
+      <div class="modal-handle"></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--white);margin-bottom:10px">Record a Reel</div>
+      <div style="position:relative;background:#000;border-radius:var(--r);overflow:hidden;aspect-ratio:9/16;max-height:60vh;margin:0 auto">
+        <video id="recPreview" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover;background:#000"></video>
+        <div id="recTimer" style="position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:600;padding:4px 12px;border-radius:12px;display:none">0:00 / 1:00</div>
+        <button id="recFlip" onclick="flipRecorderCamera()" style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,.6);color:#fff;border:none;width:38px;height:38px;border-radius:50%;font-size:16px;cursor:pointer">🔄</button>
+      </div>
+      <div id="recMsg" style="font-size:11px;color:var(--mid);margin-top:8px;min-height:14px"></div>
+      <div id="recControls" style="display:flex;gap:10px;justify-content:center;align-items:center;margin-top:10px">
+        <button id="recStartBtn" onclick="startRecording()" style="background:var(--red);color:#fff;border:none;padding:13px 28px;border-radius:14px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif">● Record</button>
+      </div>
+      <button onclick="closeRecorder()" style="width:100%;background:transparent;color:var(--mid);border:none;padding:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">Cancel</button>
+    </div>`;
+  m.style.display='flex';
+  await startRecorderCamera();
+}
+
+async function startRecorderCamera(){
+  const msg=document.getElementById('recMsg');
+  try{
+    if(window._ruRec.stream){window._ruRec.stream.getTracks().forEach(t=>t.stop());}
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:window._ruRec.facing },
+      audio:true
+    });
+    window._ruRec.stream=stream;
+    const vid=document.getElementById('recPreview');
+    if(vid){vid.srcObject=stream; vid.muted=true;}
+    if(msg)msg.textContent='';
+  }catch(e){
+    console.log('camera error:',e);
+    if(msg){msg.style.color='var(--red)';msg.textContent='Could not access camera. Please allow camera permission, or use "choose a file" instead.';}
+  }
+}
+
+async function flipRecorderCamera(){
+  window._ruRec.facing = (window._ruRec.facing==='environment') ? 'user' : 'environment';
+  await startRecorderCamera();
+}
+
+function startRecording(){
+  const rec=window._ruRec;
+  if(!rec.stream){startRecorderCamera();return;}
+  rec.chunks=[]; rec.blob=null; rec.seconds=0;
+  let mime='video/webm';
+  if(window.MediaRecorder && MediaRecorder.isTypeSupported){
+    if(MediaRecorder.isTypeSupported('video/mp4'))mime='video/mp4';
+    else if(MediaRecorder.isTypeSupported('video/webm;codecs=vp9'))mime='video/webm;codecs=vp9';
+    else if(MediaRecorder.isTypeSupported('video/webm'))mime='video/webm';
+  }
+  try{
+    rec.recorder=new MediaRecorder(rec.stream,{mimeType:mime});
+  }catch(e){
+    try{rec.recorder=new MediaRecorder(rec.stream);}catch(e2){
+      const msg=document.getElementById('recMsg');
+      if(msg){msg.style.color='var(--red)';msg.textContent='Recording is not supported on this browser. Please use "choose a file" instead.';}
+      return;
+    }
+  }
+  rec.recorder.ondataavailable=function(ev){if(ev.data&&ev.data.size>0)rec.chunks.push(ev.data);};
+  rec.recorder.onstop=function(){
+    rec.blob=new Blob(rec.chunks,{type:rec.recorder.mimeType||mime});
+    showRecordedPreview();
+  };
+  rec.recorder.start();
+  // Timer + 60s auto-stop
+  const timerEl=document.getElementById('recTimer');
+  if(timerEl)timerEl.style.display='block';
+  rec.timer=setInterval(function(){
+    rec.seconds++;
+    const mm=Math.floor(rec.seconds/60), ss=rec.seconds%60;
+    if(timerEl)timerEl.textContent=mm+':'+(ss<10?'0':'')+ss+' / 1:00';
+    if(rec.seconds>=60){ stopRecording(); }
+  },1000);
+  // Swap controls to a Stop button
+  const c=document.getElementById('recControls');
+  if(c)c.innerHTML=`<button onclick="stopRecording()" style="background:#fff;color:#000;border:none;padding:13px 28px;border-radius:14px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif">■ Stop</button>`;
+}
+
+function stopRecording(){
+  const rec=window._ruRec;
+  if(rec.timer){clearInterval(rec.timer);rec.timer=null;}
+  if(rec.recorder && rec.recorder.state!=='inactive'){ try{rec.recorder.stop();}catch(e){} }
+}
+
+function showRecordedPreview(){
+  const rec=window._ruRec;
+  if(rec.stream){rec.stream.getTracks().forEach(t=>t.stop());rec.stream=null;}
+  const m=document.getElementById('ruRecorder');
+  if(!m)return;
+  const url=URL.createObjectURL(rec.blob);
+  const sizeMB=(rec.blob.size/1024/1024).toFixed(1);
+  m.innerHTML=`
+    <div class="modal" style="text-align:center;max-width:440px">
+      <div class="modal-handle"></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--white);margin-bottom:10px">Review</div>
+      <div style="background:#000;border-radius:var(--r);overflow:hidden;aspect-ratio:9/16;max-height:60vh;margin:0 auto">
+        <video src="${url}" controls autoplay loop playsinline style="width:100%;height:100%;object-fit:cover;background:#000"></video>
+      </div>
+      <div style="font-size:11px;color:var(--mid);margin-top:8px">${rec.seconds}s · ${sizeMB} MB</div>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:10px">
+        <button onclick="retakeRecording()" style="background:var(--dark3);color:var(--white);border:1px solid var(--dark5);padding:12px 22px;border-radius:14px;font-size:14px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Retake</button>
+        <button onclick="useRecording()" style="background:var(--red);color:#fff;border:none;padding:12px 28px;border-radius:14px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif">Use this</button>
+      </div>
+    </div>`;
+}
+
+async function retakeRecording(){
+  window._ruRec.blob=null;
+  await openRecorder();
+}
+
+function useRecording(){
+  const rec=window._ruRec;
+  if(!rec.blob){closeRecorder();return;}
+  if(rec.blob.size>50*1024*1024){
+    alert('That clip is over 50 MB. Try a shorter recording.');
+    return;
+  }
+  // Hand the recorded blob to the post flow as a File.
+  const ext=(rec.blob.type.indexOf('mp4')>=0)?'mp4':'webm';
+  window._ruRecordedFile=new File([rec.blob],'reel_'+Date.now()+'.'+ext,{type:rec.blob.type});
+  closeRecorder();
+  // Show a little confirmation in the post modal + clear any chosen file.
+  const fileInput=document.getElementById('reelFile');
+  if(fileInput)fileInput.value='';
+  const prev=document.getElementById('reelRecordedPreview');
+  if(prev){
+    const url=URL.createObjectURL(rec.blob);
+    prev.innerHTML=`<div style="background:var(--dark2);border:1px solid var(--green);border-radius:10px;padding:8px;display:flex;align-items:center;gap:10px">
+      <video src="${url}" muted playsinline style="width:50px;height:50px;object-fit:cover;border-radius:8px;background:#000"></video>
+      <div style="flex:1;text-align:left;font-size:12px;color:var(--green)">✓ Recorded video ready to post</div>
+      <button onclick="clearRecordedReel()" style="background:transparent;border:none;color:var(--mid);font-size:11px;cursor:pointer">Remove</button>
+    </div>`;
+  }
+  const msg=document.getElementById('reelPostMsg');
+  if(msg){msg.style.color='var(--mid)';msg.textContent='';}
+}
+
+function clearRecordedReel(){
+  window._ruRecordedFile=null;
+  const prev=document.getElementById('reelRecordedPreview');
+  if(prev)prev.innerHTML='';
+}
+
+function closeRecorder(){
+  const rec=window._ruRec;
+  if(rec.timer){clearInterval(rec.timer);rec.timer=null;}
+  if(rec.recorder && rec.recorder.state!=='inactive'){try{rec.recorder.stop();}catch(e){}}
+  if(rec.stream){rec.stream.getTracks().forEach(t=>t.stop());rec.stream=null;}
+  const m=document.getElementById('ruRecorder');
+  if(m)m.style.display='none';
+}
+
 async function doPostReel(){
   const cap=document.getElementById('reelCaption').value.trim();
   const fileInput=document.getElementById('reelFile');
-  const file=fileInput&&fileInput.files&&fileInput.files[0];
+  // A recorded video (from the in-app recorder) takes priority over a chosen file.
+  const file=window._ruRecordedFile || (fileInput&&fileInput.files&&fileInput.files[0]);
   const msg=document.getElementById('reelPostMsg');
   const btn=document.getElementById('reelPostBtn');
-  if(!cap&&!file){msg.textContent='Add a caption or a photo to post.';return;}
-  btn.disabled=true;btn.textContent='Posting…';msg.textContent='';
+  if(!cap&&!file){msg.style.color='var(--mid)';msg.textContent='Add a caption, photo, or video to post.';return;}
+  // Re-guard video size here too in case checkReelFile was bypassed.
+  if(file && file.type && file.type.indexOf('video/')===0 && file.size>50*1024*1024){
+    msg.style.color='var(--red)';msg.textContent='That video is over 50 MB. Please trim it.';return;
+  }
+  btn.disabled=true;btn.textContent='Posting…';msg.style.color='var(--mid)';msg.textContent=file&&file.type.indexOf('video/')===0?'Uploading video… this can take a moment.':'';
   await submitReel(cap,file);
   closePostReel();
   state.currentTab='reels';
