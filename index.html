@@ -546,7 +546,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
       <button id="ruLoginBtn" class="ru-auth-btn">Log in</button>
       <div style="text-align:center;margin-top:10px"><span onclick="ruForgotPassword()" style="font-size:12px;color:var(--mid);cursor:pointer;text-decoration:underline">Forgot password?</span></div>
       <div class="ru-auth-switch">New here? <button onclick="ruShow('signup')">Create an account</button></div>
-      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v10 · loading…</div>
+      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v11 · loading…</div>
     </div>
 
     <!-- SIGNUP -->
@@ -571,7 +571,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
   (function(){
     try{
       var t=document.getElementById('ruVersionTag');
-      if(t)t.textContent='build v10 · JS OK';
+      if(t)t.textContent='build v11 · JS OK';
     }catch(e){}
     window.addEventListener('error',function(ev){
       var t=document.getElementById('ruVersionTag');
@@ -901,9 +901,9 @@ async function saveProfile(){
   try{
     const file=photoInput&&photoInput.files&&photoInput.files[0];
     if(file){
-      const ext=(file.name.split('.').pop()||'jpg').toLowerCase();
-      const path='avatars/'+user.id+'.'+ext;
-      const up=await db.storage.from('reels').upload(path,file,{upsert:true});
+      const blob=await compressImage(file,512,0.85); // avatars: small square-ish
+      const path='avatars/'+user.id+'.jpg';
+      const up=await db.storage.from('reels').upload(path,blob,{upsert:true,contentType:'image/jpeg'});
       if(up.error)throw up.error;
       const pub=db.storage.from('reels').getPublicUrl(path);
       // cache-bust so a replaced photo shows immediately
@@ -1075,27 +1075,42 @@ async function loadMyGyms(){
 // Create or edit a gym page. Pass a gym id to edit, or nothing to create.
 async function openGymForm(gymId){
   closeProfileMenu();
-  let gym={name:'',location:'',team:'',sports:''};
+  let gym={name:'',location:'',team:'',sports:'',address:'',contact:'',bio:'',avatar_url:''};
   if(gymId){const g=(state.myGyms||[]).find(x=>x.id===gymId);if(g)gym=g;}
   let m=document.getElementById('ruGymForm');
   if(!m){m=document.createElement('div');m.id='ruGymForm';m.className='modal-bg';m.onclick=function(e){if(e.target===m)m.style.display='none';};document.body.appendChild(m);}
   const sportOpts=['Boxing','MMA','Kickboxing','Muay Thai'];
+  const inp='width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:\'DM Sans\',sans-serif;margin-top:5px;box-sizing:border-box';
+  const lbl='font-size:12px;color:var(--mid);display:block;margin-top:10px';
   m.innerHTML=`
     <div class="modal" style="text-align:left;max-height:85vh;overflow-y:auto">
       <div class="modal-handle"></div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white)">${gymId?'Edit Gym':'Create a Gym'}</div>
-      <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">🏋 This creates a gym page that you own and control. Self-listed for early access — not verified by RoundUp.</div>
-      <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">Gym name <span style="color:var(--red)">*</span></label>
-      <input id="gf_name" type="text" value="${(gym.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. HAC Boxing" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
-      <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">Location (city/area) <span style="color:var(--red)">*</span></label>
-      <input id="gf_location" type="text" value="${(gym.location||'').replace(/"/g,'&quot;')}" placeholder="Tulsa, OK" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
-      <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">Combat sports offered</label>
-      <select id="gf_sports" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
+      <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">🏋 This is your gym's page — you own and control it. Self-listed for early access; not verified by RoundUp.</div>
+
+      <div style="display:flex;align-items:center;gap:14px;margin-top:6px">
+        <div id="gfAvatarPreview">${gym.avatar_url?`<img src="${gym.avatar_url}" style="width:64px;height:64px;border-radius:14px;object-fit:cover">`:`<div style="width:64px;height:64px;border-radius:14px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:28px">🏋</div>`}</div>
+        <div style="flex:1"><label style="${lbl};margin-top:0">Gym photo</label><input id="gf_photo" type="file" accept="image/*" style="display:block;margin-top:6px;color:var(--lighter);font-size:12px;width:100%"></div>
+      </div>
+
+      <label style="${lbl}">Gym name <span style="color:var(--red)">*</span></label>
+      <input id="gf_name" type="text" value="${(gym.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. HAC Boxing" style="${inp}">
+      <label style="${lbl}">City / area <span style="color:var(--red)">*</span></label>
+      <input id="gf_location" type="text" value="${(gym.location||'').replace(/"/g,'&quot;')}" placeholder="Tulsa, OK" style="${inp}">
+      <label style="${lbl}">Street address (optional)</label>
+      <input id="gf_address" type="text" value="${(gym.address||'').replace(/"/g,'&quot;')}" placeholder="123 Main St, Tulsa, OK 74103" style="${inp}">
+      <label style="${lbl}">Contact (phone / email / IG — optional)</label>
+      <input id="gf_contact" type="text" value="${(gym.contact||'').replace(/"/g,'&quot;')}" placeholder="(918) 555-0123 · @yourgym" style="${inp}">
+      <label style="${lbl}">Combat sports offered</label>
+      <select id="gf_sports" style="${inp}">
         <option value="">— Select —</option>
         ${sportOpts.map(o=>`<option value="${o}" ${gym.sports===o?'selected':''}>${o}</option>`).join('')}
       </select>
-      <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">Team / about (optional)</label>
-      <input id="gf_team" type="text" value="${(gym.team||'').replace(/"/g,'&quot;')}" placeholder="A few words about the gym" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
+      <label style="${lbl}">About the gym (optional)</label>
+      <textarea id="gf_bio" rows="3" placeholder="Tell people about your gym, your coaches, your schedule..." style="${inp};resize:vertical">${escapeHtml(gym.bio||'')}</textarea>
+      <label style="${lbl}">Team / who trains here (optional)</label>
+      <input id="gf_team" type="text" value="${(gym.team||'').replace(/"/g,'&quot;')}" placeholder="Notable fighters or teams" style="${inp}">
+
       <div id="gfMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
       <button id="gfSaveBtn" onclick="saveGym('${gymId||''}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">${gymId?'Save changes':'Create gym'}</button>
       ${gymId?`<button onclick="deleteGym('${gymId}')" style="width:100%;background:transparent;color:var(--red);border:none;padding:9px;font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:4px">Delete this gym</button>`:''}
@@ -1112,21 +1127,42 @@ async function saveGym(gymId){
   const location=(document.getElementById('gf_location').value||'').trim();
   const sports=(document.getElementById('gf_sports').value||'').trim();
   const team=(document.getElementById('gf_team').value||'').trim();
+  const address=(document.getElementById('gf_address').value||'').trim();
+  const contact=(document.getElementById('gf_contact').value||'').trim();
+  const bio=(document.getElementById('gf_bio').value||'').trim();
+  const photoInput=document.getElementById('gf_photo');
   const msg=document.getElementById('gfMsg');
   const btn=document.getElementById('gfSaveBtn');
   if(!name){msg.textContent='Please enter a gym name.';return;}
   if(!location){msg.textContent='Please enter a location.';return;}
   btn.disabled=true;btn.textContent='Saving…';
   try{
+    // For a new gym we need its id before we can name the photo file, so we
+    // insert first, then (if a photo was chosen) upload and update.
+    let theId=gymId;
+    const fields={name:name,location:location,sports:sports,team:team,address:address,contact:contact,bio:bio};
     if(gymId){
-      const {error}=await db.from('gyms').update({name:name,location:location,sports:sports,team:team}).eq('id',gymId);
+      const {error}=await db.from('gyms').update(fields).eq('id',gymId);
       if(error)throw error;
     }else{
-      const {error}=await db.from('gyms').insert({owner_id:user.id,name:name,location:location,sports:sports,team:team});
-      if(error)throw error;
+      const ins=await db.from('gyms').insert({owner_id:user.id,...fields}).select('id').limit(1);
+      if(ins.error)throw ins.error;
+      theId=ins.data&&ins.data[0]&&ins.data[0].id;
+    }
+    // Optional gym photo
+    const file=photoInput&&photoInput.files&&photoInput.files[0];
+    if(file&&theId){
+      const blob=await compressImage(file,640,0.85);
+      const path='gyms/'+theId+'.jpg';
+      const up=await db.storage.from('reels').upload(path,blob,{upsert:true,contentType:'image/jpeg'});
+      if(!up.error){
+        const pub=db.storage.from('reels').getPublicUrl(path);
+        await db.from('gyms').update({avatar_url:pub.data.publicUrl+'?v='+Date.now()}).eq('id',theId);
+      }
     }
     const gm=document.getElementById('ruGymForm'); if(gm)gm.style.display='none';
     await loadMyGyms();
+    if(state.currentScreen==='gym_page'&&theId)loadGymPage(theId);
     render();
     alert('Gym saved!');
   }catch(e){
@@ -1310,9 +1346,10 @@ function renderGymPage(){
     <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Gym</div><div style="width:34px"></div></div>
     <div class="inner-scroll">
       <div style="padding:24px 18px 16px;text-align:center;background:linear-gradient(180deg,rgba(245,166,35,.08),transparent)">
-        <div style="width:84px;height:84px;border-radius:18px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:38px;margin:0 auto 12px">🏋</div>
+        ${g.avatar_url?`<img src="${g.avatar_url}" style="width:84px;height:84px;border-radius:18px;object-fit:cover;margin:0 auto 12px;display:block">`:`<div style="width:84px;height:84px;border-radius:18px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:38px;margin:0 auto 12px">🏋</div>`}
         <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;color:var(--white);line-height:1">${escapeHtml(g.name)}</div>
         <div style="font-size:13px;color:var(--lighter);margin-top:4px">📍 ${escapeHtml(g.location||'')}</div>
+        ${g.sports?`<div style="margin-top:6px"><span style="display:inline-block;background:var(--dark3);color:var(--lighter);font-size:10px;padding:3px 10px;border-radius:10px">${escapeHtml(g.sports)}</span></div>`:''}
         <div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:var(--dark3);padding:4px 12px;border-radius:12px"><span style="font-size:11px;font-weight:600;color:var(--gold);text-transform:uppercase;letter-spacing:.5px">Gym</span><span style="font-size:9px;color:var(--mid)">● self-listed</span></div>
         ${isOwner?`<div style="margin-top:14px"><button onclick="openGymForm('${g.id}')" style="background:var(--dark3);color:var(--white);border:none;padding:9px 26px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Edit gym</button></div>`:`
           ${(()=>{
@@ -1325,9 +1362,19 @@ function renderGymPage(){
           })()}`}
       </div>
 
-      <div class="sec-head"><div class="sec-title">About</div></div>
+      <div style="display:flex;justify-content:center;gap:28px;margin:4px 18px 0;padding:14px 0;border-top:1px solid var(--dark3);border-bottom:1px solid var(--dark3)">
+        <div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--white)">${(state.viewGymMembers&&state.viewGymMembers.approved.length)||0}</div><div style="font-size:10px;color:var(--mid);text-transform:uppercase;letter-spacing:.5px">Fighters</div></div>
+        <div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--white)">${g.sports?'1':'0'}</div><div style="font-size:10px;color:var(--mid);text-transform:uppercase;letter-spacing:.5px">Sports</div></div>
+        <div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--gold)">●</div><div style="font-size:10px;color:var(--mid);text-transform:uppercase;letter-spacing:.5px">Self-listed</div></div>
+      </div>
+
+      ${g.bio?`<div class="sec-head"><div class="sec-title">About</div></div><div style="margin:0 18px 8px;font-size:13px;color:var(--lighter);line-height:1.6">${escapeHtml(g.bio)}</div>`:''}
+
+      <div class="sec-head"><div class="sec-title">Details</div></div>
       <div style="margin:0 18px 8px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:4px 14px">
         ${g.sports?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3)"><span style="font-size:12px;color:var(--mid)">Sports</span><span style="font-size:13px;color:var(--white);font-weight:500">${escapeHtml(g.sports)}</span></div>`:''}
+        ${g.address?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3);gap:12px"><span style="font-size:12px;color:var(--mid);white-space:nowrap">Address</span><span style="font-size:13px;color:var(--white);font-weight:500;text-align:right">${escapeHtml(g.address)}</span></div>`:''}
+        ${g.contact?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3);gap:12px"><span style="font-size:12px;color:var(--mid);white-space:nowrap">Contact</span><span style="font-size:13px;color:var(--white);font-weight:500;text-align:right">${escapeHtml(g.contact)}</span></div>`:''}
         ${g.team?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3)"><span style="font-size:12px;color:var(--mid)">Team</span><span style="font-size:13px;color:var(--white);font-weight:500">${escapeHtml(g.team)}</span></div>`:''}
         <div style="display:flex;justify-content:space-between;padding:9px 0"><span style="font-size:12px;color:var(--mid)">Owner</span><span onclick="openUserProfile('${g.owner_id}')" style="font-size:13px;color:var(--gold);font-weight:500;cursor:pointer">${escapeHtml(ownerName)} ›</span></div>
       </div>
@@ -3791,30 +3838,42 @@ function renderProfileDetail(){
         <div style="font-size:10px;color:var(--mid);padding:8px 0 4px;line-height:1.4">⏳ Self-listed — not verified by RoundUp. Real credentials required when events launch.</div>
       </div>`:''}
 
-      <!-- Subscription preview — clearly labeled, not functional -->
+      <!-- Subscription preview — polished, clearly launching-soon, not yet active -->
       ${!isMe?`
-      <div class="sec-head"><div class="sec-title">Support ${name.split(' ')[0]}</div></div>
-      <div style="margin:0 18px 8px;position:relative;border:1px dashed var(--dark5);border-radius:var(--r);overflow:hidden;opacity:.9">
-        <div style="position:absolute;top:10px;right:10px;z-index:2;background:rgba(0,0,0,.7);color:var(--gold);font-size:9px;font-weight:700;letter-spacing:1px;padding:4px 9px;border-radius:10px;text-transform:uppercase">Preview · Coming soon</div>
-        <div style="padding:16px 14px">
-          <div style="font-size:11px;color:var(--mid);line-height:1.5;margin-bottom:12px">When RoundUp launches paid features, you'll be able to subscribe to support ${p.role==='gym'?'this gym':name.split(' ')[0]} and unlock perks. This is a preview — nothing is active yet and no payments are taken.</div>
-          ${(p.role==='fighter'||!p.role)?`
-          <div style="display:flex;flex-direction:column;gap:8px">
-            <div style="display:flex;justify-content:space-between;align-items:center;background:var(--dark2);border:1px solid var(--dark4);border-radius:10px;padding:11px 13px">
-              <div><div style="font-size:12px;font-weight:600;color:var(--white)">👊 Corner</div><div style="font-size:10px;color:var(--mid)">Exclusive posts & updates</div></div>
-              <div style="font-size:12px;color:var(--mid)">$4.99/mo</div>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;background:var(--dark2);border:1px solid var(--dark4);border-radius:10px;padding:11px 13px">
-              <div><div style="font-size:12px;font-weight:600;color:var(--white)">🥊 Ringside</div><div style="font-size:10px;color:var(--mid)">All Corner perks + ticket discounts</div></div>
-              <div style="font-size:12px;color:var(--mid)">$14.99/mo</div>
-            </div>
-          </div>`:`
-          <div style="display:flex;justify-content:space-between;align-items:center;background:var(--dark2);border:1px solid var(--dark4);border-radius:10px;padding:11px 13px">
-            <div><div style="font-size:12px;font-weight:600;color:var(--white)">⭐ Supporter</div><div style="font-size:10px;color:var(--mid)">Early news & behind-the-scenes</div></div>
-            <div style="font-size:12px;color:var(--mid)">from $3.99/mo</div>
-          </div>`}
-          <button disabled style="width:100%;background:var(--dark3);color:var(--mid);border:none;padding:11px;border-radius:10px;font-size:12px;font-weight:600;margin-top:10px;cursor:not-allowed;font-family:'DM Sans',sans-serif">Subscriptions launch later — follow for now</button>
+      <div class="sec-head" style="display:flex;justify-content:space-between;align-items:center">
+        <div class="sec-title">Support ${escapeHtml(name.split(' ')[0])}</div>
+        <span style="background:rgba(245,166,35,.12);color:var(--gold);font-size:9px;font-weight:700;letter-spacing:.5px;padding:4px 10px;border-radius:10px;text-transform:uppercase;white-space:nowrap">Launching soon</span>
+      </div>
+      <div style="margin:0 18px 16px;border:1px solid var(--dark4);border-radius:var(--r);overflow:hidden;background:var(--dark2)">
+        <div style="padding:14px 16px;border-bottom:1px solid var(--dark3)">
+          <div style="font-size:12px;color:var(--lighter);line-height:1.55">Here's how supporting ${p.role==='gym'?'this gym':escapeHtml(name.split(' ')[0])} will work once RoundUp goes live. Everything's built — we're finishing the official paperwork before turning on payments.</div>
         </div>
+        ${(p.role==='fighter'||!p.role)?`
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="border:1px solid var(--dark4);border-radius:12px;padding:13px 14px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><div style="font-size:14px;font-weight:700;color:var(--white)">Free · Follow</div><div style="font-size:13px;color:var(--lighter);font-weight:600">$0</div></div>
+            <div style="font-size:11px;color:var(--mid);line-height:1.7">✓ Browse profile &amp; stats<br>✓ Follow + get fight notifications</div>
+          </div>
+          <div style="border:1px solid rgba(245,166,35,.4);border-radius:12px;padding:13px 14px;background:rgba(245,166,35,.04)">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><div style="font-size:14px;font-weight:700;color:var(--white)">👊 Corner <span style="font-size:9px;background:var(--gold);color:#000;padding:2px 7px;border-radius:8px;margin-left:4px">Popular</span></div><div style="font-size:13px;color:var(--gold);font-weight:700">$4.99<span style="font-size:10px;color:var(--mid);font-weight:400">/mo</span></div></div>
+            <div style="font-size:11px;color:var(--lighter);line-height:1.7">★ Everything in Free<br>📺 Exclusive posts, training logs &amp; updates<br>💬 Post-fight Q&amp;A access<br>🎟 Ticket discounts</div>
+          </div>
+          <div style="border:1px solid var(--dark4);border-radius:12px;padding:13px 14px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><div style="font-size:14px;font-weight:700;color:var(--white)">🥊 Ringside</div><div style="font-size:13px;color:var(--lighter);font-weight:700">$14.99<span style="font-size:10px;color:var(--mid);font-weight:400">/mo</span></div></div>
+            <div style="font-size:11px;color:var(--lighter);line-height:1.7">🔥 Everything in Corner<br>🪑 Priority reserved seating<br>🤝 Meet &amp; greet at events<br>📸 Exclusive content drops first</div>
+          </div>
+        </div>`:`
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="border:1px solid var(--dark4);border-radius:12px;padding:13px 14px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><div style="font-size:14px;font-weight:700;color:var(--white)">Free · Follow</div><div style="font-size:13px;color:var(--lighter);font-weight:600">$0</div></div>
+            <div style="font-size:11px;color:var(--mid);line-height:1.7">✓ See the roster &amp; updates<br>✓ Event announcements</div>
+          </div>
+          <div style="border:1px solid rgba(245,166,35,.4);border-radius:12px;padding:13px 14px;background:rgba(245,166,35,.04)">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px"><div style="font-size:14px;font-weight:700;color:var(--white)">⭐ Supporter</div><div style="font-size:13px;color:var(--gold);font-weight:700">$3.99<span style="font-size:10px;color:var(--mid);font-weight:400">/mo</span></div></div>
+            <div style="font-size:11px;color:var(--lighter);line-height:1.7">🎟 Early ticket access<br>📺 Behind-the-scenes content<br>📣 Weekly gym updates</div>
+          </div>
+        </div>`}
+        <div style="padding:0 16px 16px"><button disabled style="width:100%;background:var(--dark3);color:var(--mid);border:none;padding:12px;border-radius:10px;font-size:12px;font-weight:600;cursor:not-allowed;font-family:'DM Sans',sans-serif">Subscriptions open at launch — follow for now</button></div>
       </div>`:''}
 
 
@@ -6162,13 +6221,40 @@ function renderCreatorHome(){
     <div class="sec-head"><div class="sec-title">Latest Reels</div><div class="sec-link" onclick="setTab('reels')">See all →</div></div>
     ${reelsRow}
 
+    ${(()=>{
+      // Popular right now — real members/gyms from the directory (no fake data).
+      if(!window._popLoaded){window._popLoaded=true;setTimeout(loadDirectory,0);}
+      const people=(state.directory||[]).slice(0,6);
+      const gyms=(state.dirGyms||[]).slice(0,4);
+      if(people.length===0 && gyms.length===0) return '';
+      let cards='';
+      gyms.forEach(g=>{
+        cards+=`<div onclick="openGymPage('${g.id}')" style="min-width:130px;max-width:130px;flex-shrink:0;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:14px 10px;text-align:center;cursor:pointer">
+          <div style="width:48px;height:48px;border-radius:12px;margin:0 auto 8px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:22px">${g.avatar_url?`<img src="${g.avatar_url}" style="width:48px;height:48px;border-radius:12px;object-fit:cover">`:'🏋'}</div>
+          <div style="font-size:12px;font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(g.name)}</div>
+          <div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.5px">Gym</div>
+        </div>`;
+      });
+      people.forEach(p=>{
+        const nm=(p.display_name||p.username)||'Creator';
+        const rc={fighter:'var(--red)',coach:'var(--purple)',official:'var(--green)',sponsor:'var(--blue)'}[p.role]||'var(--light)';
+        cards+=`<div onclick="openUserProfile('${p.id}')" style="min-width:130px;max-width:130px;flex-shrink:0;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:14px 10px;text-align:center;cursor:pointer">
+          <div style="display:flex;justify-content:center;margin-bottom:8px">${avatarHtml(p,nm,48)}</div>
+          <div style="font-size:12px;font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(nm)}</div>
+          <div style="font-size:10px;color:${rc};text-transform:uppercase;letter-spacing:.5px">${p.role?(ROLE_LABELS[p.role]||p.role):'Creator'}</div>
+        </div>`;
+      });
+      return `<div class="sec-head" style="margin-top:6px"><div class="sec-title">Popular Right Now</div><div class="sec-link" onclick="setTab('find')">Browse all →</div></div>
+        <div class="h-scroll">${cards}</div>`;
+    })()}
+
     <div class="sec-head" style="margin-top:6px"><div class="sec-title">Coming Soon</div></div>
     <div style="padding:0 18px 4px;font-size:11px;color:var(--mid);line-height:1.5;margin-bottom:8px">More is on the way for RoundUp. Here's what we're building next:</div>
     <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px">
       ${[
         ['🎟','Live event tickets','Buy tickets to sanctioned Tulsa fight cards right in the app.'],
-        ['🥊','Verified fighter profiles','Real fighter pages with records, rankings, and upcoming bouts.'],
-        ['🏋','Gym pages','Follow your gym, see its roster, and get event news.'],
+        ['🥊','Verified fighter profiles','Official verified records, rankings, and upcoming bouts.'],
+        ['💳','Subscriptions','Support your favorite fighters and gyms with monthly tiers.'],
         ['⚖','Sanctioned events','Full cards run with USA Boxing LBC #27 officials and rules.'],
       ].map(([ic,t,d])=>`
         <div style="display:flex;gap:12px;align-items:flex-start;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:12px 14px">
@@ -7020,9 +7106,10 @@ async function submitReel(caption, file){
   let media_url=null, media_type=null;
   try{
     if(file){
-      const ext=(file.name.split('.').pop()||'jpg').toLowerCase();
-      const path=user.id+'/'+Date.now()+'.'+ext;
-      const up=await db.storage.from('reels').upload(path,file,{upsert:false});
+      const isImg=file.type&&file.type.indexOf('image/')===0;
+      const blob=isImg?await compressImage(file,1280,0.82):file;
+      const path=user.id+'/'+Date.now()+'.jpg';
+      const up=await db.storage.from('reels').upload(path,blob,{upsert:false,contentType:isImg?'image/jpeg':file.type});
       if(up.error)throw up.error;
       const pub=db.storage.from('reels').getPublicUrl(path);
       media_url=pub.data.publicUrl; media_type='image';
@@ -7253,6 +7340,38 @@ function renderReelsFeed(role){
       ${feed}
       <div style="height:20px"></div>
     </div>`;
+}
+
+// Compress/resize an image file in the browser before upload. Keeps photos
+// looking good while shrinking them ~10x (e.g. 4MB -> ~300KB), so storage
+// lasts far longer and images load faster. Returns a Blob (jpeg).
+// maxDim = longest side in px. Falls back to the original file on any error.
+function compressImage(file, maxDim, quality){
+  maxDim=maxDim||1280; quality=quality||0.82;
+  return new Promise(function(resolve){
+    try{
+      if(!file || !file.type || file.type.indexOf('image/')!==0){resolve(file);return;}
+      const url=URL.createObjectURL(file);
+      const img=new Image();
+      img.onload=function(){
+        try{
+          let w=img.width, h=img.height;
+          if(w>h && w>maxDim){h=Math.round(h*maxDim/w); w=maxDim;}
+          else if(h>=w && h>maxDim){w=Math.round(w*maxDim/h); h=maxDim;}
+          const canvas=document.createElement('canvas');
+          canvas.width=w; canvas.height=h;
+          const ctx=canvas.getContext('2d');
+          ctx.drawImage(img,0,0,w,h);
+          URL.revokeObjectURL(url);
+          canvas.toBlob(function(blob){
+            if(blob && blob.size<file.size){resolve(blob);}else{resolve(file);}
+          },'image/jpeg',quality);
+        }catch(e){URL.revokeObjectURL(url);resolve(file);}
+      };
+      img.onerror=function(){URL.revokeObjectURL(url);resolve(file);};
+      img.src=url;
+    }catch(e){resolve(file);}
+  });
 }
 
 function escapeHtml(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
