@@ -544,6 +544,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
       <input id="ruLoginEmail" class="ru-auth-input" type="email" placeholder="Email" autocomplete="email">
       <input id="ruLoginPass" class="ru-auth-input" type="password" placeholder="Password" autocomplete="current-password">
       <button id="ruLoginBtn" class="ru-auth-btn">Log in</button>
+      <div style="text-align:center;margin-top:10px"><span onclick="ruForgotPassword()" style="font-size:12px;color:var(--mid);cursor:pointer;text-decoration:underline">Forgot password?</span></div>
       <div class="ru-auth-switch">New here? <button onclick="ruShow('signup')">Create an account</button></div>
     </div>
 
@@ -7841,11 +7842,33 @@ render();
     db.auth.signInWithPassword({email:email,password:pass})
       .then(function(r){
         setBusy(false);
-        if(r.error){showErr(r.error.message);return;}
+        if(r.error){
+          var m=(r.error.message||'').toLowerCase();
+          if(m.indexOf('invalid login')>=0||m.indexOf('credentials')>=0)showErr('Incorrect email or password. Please try again.');
+          else if(m.indexOf('confirm')>=0||m.indexOf('not confirmed')>=0)showErr('Please confirm your email first — check your inbox for the confirmation link.');
+          else showErr(r.error.message);
+          return;
+        }
         openApp();
       })
       .catch(function(e){setBusy(false);showErr('Something went wrong: '+(e&&e.message||e));});
   });
+
+  // Forgot password — sends a reset email via Supabase.
+  window.ruForgotPassword=function(){
+    clearErr();
+    var email=(document.getElementById('ruLoginEmail').value||'').trim();
+    if(!email){showErr('Enter your email above first, then tap "Forgot password".');return;}
+    setBusy(true);
+    db.auth.resetPasswordForEmail(email,{redirectTo:location.origin})
+      .then(function(r){
+        setBusy(false);
+        if(r.error){showErr(r.error.message);return;}
+        showErr('Password reset link sent to '+email+'. Check your inbox (and spam).');
+        errBox.style.color='#7fe0a8';
+      })
+      .catch(function(e){setBusy(false);showErr('Could not send reset: '+(e&&e.message||e));});
+  };
 
   // Allow Enter key to submit whichever form is visible.
   document.getElementById('ruAuth').addEventListener('keydown',function(e){
@@ -7875,7 +7898,17 @@ render();
       var meta=res.data.user.user_metadata||{};
       window.ruName=meta.display_name||meta.username||'';
       window.ruUsername=meta.username||'';
+      // Ensure a profiles row exists for this user (create-or-update). This is
+      // wrapped so it can NEVER block login — if it fails, the app still opens.
+      try{
+        db.from('profiles').upsert({
+          id:res.data.user.id,
+          username:meta.username||null,
+          display_name:meta.display_name||meta.username||null
+        },{onConflict:'id',ignoreDuplicates:true}).then(function(){}).catch(function(e){console.log('profile ensure skipped:',e&&e.message);});
+      }catch(e){console.log('profile ensure error:',e&&e.message);}
       // Load the saved profile photo + self-listed role (if any) after refresh.
+      // Fully non-fatal: any failure here just means we fall back to metadata.
       db.from('profiles').select('display_name,avatar_url,role,role_info').eq('id',res.data.user.id).limit(1).then(function(pr){
         var row=pr&&pr.data&&pr.data[0];
         if(row){
@@ -7885,7 +7918,7 @@ render();
           window.ruRoleInfo=row.role_info||{};
           if(typeof render==='function')render();
         }
-      });
+      }).catch(function(e){console.log('profile load skipped:',e&&e.message);});
       // Push the real name into local state so the UI shows it everywhere.
       try{
         if(window.ruName && state && state.users && state.users.me){
