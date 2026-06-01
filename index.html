@@ -546,6 +546,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
       <button id="ruLoginBtn" class="ru-auth-btn">Log in</button>
       <div style="text-align:center;margin-top:10px"><span onclick="ruForgotPassword()" style="font-size:12px;color:var(--mid);cursor:pointer;text-decoration:underline">Forgot password?</span></div>
       <div class="ru-auth-switch">New here? <button onclick="ruShow('signup')">Create an account</button></div>
+      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v6 · loading…</div>
     </div>
 
     <!-- SIGNUP -->
@@ -562,6 +563,22 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
     <div id="ruAuthBusy" class="ru-auth-busy" style="display:none">Working…</div>
   </div>
 </div>
+<script>
+  // Independent probe: proves the page's JavaScript runs at all, separate from
+  // the Supabase gate. If you see "build v5 · JS OK" on the login screen, the
+  // page script works. If any error happens during page setup, it shows here
+  // in plain text instead of leaving dead, silent buttons.
+  (function(){
+    try{
+      var t=document.getElementById('ruVersionTag');
+      if(t)t.textContent='build v6 · JS OK';
+    }catch(e){}
+    window.addEventListener('error',function(ev){
+      var t=document.getElementById('ruVersionTag');
+      if(t){t.style.color='#ff6b6b';t.style.opacity='1';t.textContent='Script error: '+(ev.message||'unknown')+' @ line '+(ev.lineno||'?');}
+    });
+  })();
+</script>
 <!-- =============================================================== -->
 
 <div id="app">
@@ -782,6 +799,8 @@ const DEFAULT_STATE={
 };
 
 let state={};
+
+function saveState(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch(e){}}
 
 function loadState(){
   try{const saved=localStorage.getItem(STORAGE_KEY);if(saved){state=JSON.parse(saved);return;}}catch(e){}
