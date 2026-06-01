@@ -546,7 +546,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
       <button id="ruLoginBtn" class="ru-auth-btn">Log in</button>
       <div style="text-align:center;margin-top:10px"><span onclick="ruForgotPassword()" style="font-size:12px;color:var(--mid);cursor:pointer;text-decoration:underline">Forgot password?</span></div>
       <div class="ru-auth-switch">New here? <button onclick="ruShow('signup')">Create an account</button></div>
-      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v9 · loading…</div>
+      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v10 · loading…</div>
     </div>
 
     <!-- SIGNUP -->
@@ -571,7 +571,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
   (function(){
     try{
       var t=document.getElementById('ruVersionTag');
-      if(t)t.textContent='build v9 · JS OK';
+      if(t)t.textContent='build v10 · JS OK';
     }catch(e){}
     window.addEventListener('error',function(ev){
       var t=document.getElementById('ruVersionTag');
@@ -1225,6 +1225,7 @@ async function approveGymMember(memberId, gymId){
     const {error}=await db.from('gym_members').update({status:'approved'}).eq('id',memberId);
     if(error)throw error;
     await loadGymPage(gymId);
+    loadMyNotifications();
   }catch(e){alert('Could not approve: '+(e&&e.message||e));}
 }
 
@@ -1235,7 +1236,58 @@ async function declineGymMember(memberId, gymId){
     const {error}=await db.from('gym_members').delete().eq('id',memberId);
     if(error)throw error;
     await loadGymPage(gymId);
+    loadMyNotifications();
   }catch(e){alert('Could not update: '+(e&&e.message||e));}
+}
+
+// ===== Notifications (Stage C polish) =====
+// Count + load pending join requests across all gyms the current user owns.
+async function loadMyNotifications(){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user)return;
+  try{
+    const gy=await db.from('gyms').select('id,name').eq('owner_id',user.id);
+    const myGyms=gy.data||[];
+    if(myGyms.length===0){ state.notifPending=[]; paintNotifBadge(); return; }
+    const gymIds=myGyms.map(g=>g.id);
+    const gymNameById={}; myGyms.forEach(g=>{gymNameById[g.id]=g.name;});
+    const mem=await db.from('gym_members').select('id,gym_id,user_id,created_at').in('gym_id',gymIds).eq('status','pending').order('created_at',{ascending:false});
+    const rows=mem.data||[];
+    const ids=[...new Set(rows.map(r=>r.user_id))];
+    let pmap={};
+    if(ids.length){
+      const pp=await db.from('profiles').select('id,display_name,username,avatar_url').in('id',ids);
+      (pp.data||[]).forEach(p=>{pmap[p.id]=p;});
+    }
+    state.notifPending=rows.map(r=>({...r,profile:pmap[r.user_id]||null,gymName:gymNameById[r.gym_id]||'your gym'}));
+    paintNotifBadge();
+  }catch(e){console.log('loadMyNotifications error:',e&&e.message);}
+}
+
+function paintNotifBadge(){
+  const n=(state.notifPending||[]).length;
+  document.querySelectorAll('.nav-dot').forEach(function(dot){
+    if(n>0){ dot.style.display='block'; dot.textContent=''; }
+    else { dot.style.display='none'; }
+  });
+}
+
+function openNotifications(){
+  const list=state.notifPending||[];
+  const body = list.length===0
+    ? `<div style="font-size:12px;color:var(--mid);line-height:1.6;text-align:center;padding:10px">No new notifications.<br>When a fighter requests to join one of your gyms, it'll show up here.</div>`
+    : `<div style="font-size:11px;color:var(--mid);margin-bottom:10px">Fighters requesting to join your gyms:</div>
+       <div style="display:flex;flex-direction:column;gap:8px">
+       ${list.map(m=>{const nm=(m.profile&&(m.profile.display_name||m.profile.username))||'Fighter';return `
+         <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r)">
+           ${avatarHtml(m.profile,nm,38)}
+           <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${nm}</div><div style="font-size:10px;color:var(--mid)">wants to join ${escapeHtml(m.gymName)}</div></div>
+           <button onclick="approveGymMember('${m.id}','${m.gym_id}');closeActionModal();" style="background:var(--green);color:#fff;border:none;padding:6px 12px;border-radius:9px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Approve</button>
+           <button onclick="declineGymMember('${m.id}','${m.gym_id}');closeActionModal();" style="background:transparent;border:1px solid var(--dark5);color:var(--mid);padding:6px 10px;border-radius:9px;font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif">Decline</button>
+         </div>`;}).join('')}
+       </div>`;
+  openActionModal('Notifications',body,'',null);
 }
 
 function renderGymPage(){
@@ -1262,7 +1314,15 @@ function renderGymPage(){
         <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;color:var(--white);line-height:1">${escapeHtml(g.name)}</div>
         <div style="font-size:13px;color:var(--lighter);margin-top:4px">📍 ${escapeHtml(g.location||'')}</div>
         <div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:var(--dark3);padding:4px 12px;border-radius:12px"><span style="font-size:11px;font-weight:600;color:var(--gold);text-transform:uppercase;letter-spacing:.5px">Gym</span><span style="font-size:9px;color:var(--mid)">● self-listed</span></div>
-        ${isOwner?`<div style="margin-top:14px"><button onclick="openGymForm('${g.id}')" style="background:var(--dark3);color:var(--white);border:none;padding:9px 26px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Edit gym</button></div>`:''}
+        ${isOwner?`<div style="margin-top:14px"><button onclick="openGymForm('${g.id}')" style="background:var(--dark3);color:var(--white);border:none;padding:9px 26px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Edit gym</button></div>`:`
+          ${(()=>{
+            const members=state.viewGymMembers||{approved:[],pending:[]};
+            const myId3=window.ruUserId||null;
+            const mine=(members.approved.concat(members.pending)).find(m=>m.user_id===myId3);
+            if(mine&&mine.status==='approved')return `<div style="margin-top:14px;font-size:12px;color:var(--green);font-weight:600">✓ You're a member of this gym</div>`;
+            if(mine&&mine.status==='pending')return `<div style="margin-top:14px;font-size:12px;color:var(--gold);font-weight:600">⏳ Request pending</div>`;
+            return `<div style="margin-top:14px"><button onclick="requestJoinGym('${g.id}')" style="background:var(--red);color:#fff;border:none;padding:10px 28px;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif">Request to join</button></div>`;
+          })()}`}
       </div>
 
       <div class="sec-head"><div class="sec-title">About</div></div>
@@ -1277,18 +1337,8 @@ function renderGymPage(){
         ${(()=>{
           const members=state.viewGymMembers||{approved:[],pending:[]};
           const myId2=window.ruUserId||null;
-          const myMembership=(members.approved.concat(members.pending)).find(m=>m.user_id===myId2);
           let out='';
-          // Join button for non-owners who don't already have a membership/request.
-          if(!isOwner && myId2){
-            if(!myMembership){
-              out+=`<button onclick="requestJoinGym('${g.id}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:11px;border-radius:var(--r);font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;margin-bottom:10px">Request to join this gym</button>`;
-            }else if(myMembership.status==='pending'){
-              out+=`<div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.25);border-radius:var(--r);padding:11px 14px;font-size:12px;color:var(--gold);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center"><span>⏳ Request pending — waiting for the gym to approve</span><button onclick="withdrawGymRequest('${g.id}')" style="background:transparent;border:none;color:var(--mid);font-size:11px;cursor:pointer;text-decoration:underline">Withdraw</button></div>`;
-            }else if(myMembership.status==='approved'){
-              out+=`<div style="background:rgba(29,184,122,.08);border:1px solid rgba(29,184,122,.25);border-radius:var(--r);padding:11px 14px;font-size:12px;color:var(--green);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center"><span>✓ You're a member of this gym</span><button onclick="withdrawGymRequest('${g.id}')" style="background:transparent;border:none;color:var(--mid);font-size:11px;cursor:pointer;text-decoration:underline">Leave</button></div>`;
-            }
-          }
+          // (Join button + status now live in the gym header, not here.)
           // Owner: pending requests to approve/decline.
           if(isOwner && members.pending.length>0){
             out+=`<div style="font-size:11px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Pending requests (${members.pending.length})</div>`;
@@ -1302,25 +1352,34 @@ function renderGymPage(){
               </div>`;
             }).join('');
           }
-          // Approved roster (public).
+          // Roster: owner first (always), then approved members with their position.
+          const ownerName=owner?(owner.display_name||owner.username||'Owner'):'Owner';
+          out+=`<div style="font-size:11px;color:var(--mid);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin:6px 0">Roster</div>`;
+          out+=`<div onclick="openUserProfile('${g.owner_id}')" style="display:flex;align-items:center;gap:10px;background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.25);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;cursor:pointer">
+            ${avatarHtml(owner,ownerName,38)}
+            <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${escapeHtml(ownerName)}</div><div style="font-size:10px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Owner</div></div>
+            <span style="color:var(--mid);font-size:16px">›</span>
+          </div>`;
           if(members.approved.length>0){
-            out+=`<div style="font-size:11px;color:var(--mid);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin:6px 0">Fighters (${members.approved.length})</div>`;
             out+=members.approved.map(m=>{
-              const nm=(m.profile&&(m.profile.display_name||m.profile.username))||'Fighter';
+              const nm=(m.profile&&(m.profile.display_name||m.profile.username))||'Member';
               const info=(m.profile&&m.profile.role_info)||{};
-              const sub=[info.sport,info.weight?info.weight+' lbs':''].filter(Boolean).join(' · ');
+              const mRole=(m.profile&&m.profile.role)||'fighter';
+              // Position label: their listed role; for fighters show sport/weight as detail.
+              let posLabel=(ROLE_LABELS[mRole]||'Fighter');
+              let detail='';
+              if(mRole==='fighter'){detail=[info.sport,info.weight?info.weight+' lbs':''].filter(Boolean).join(' · ');}
+              else if(mRole==='coach'){detail=[info.specialty,info.sport].filter(Boolean).join(' · ');}
+              const posColor={fighter:'var(--red)',coach:'var(--purple)',official:'var(--green)',sponsor:'var(--blue)'}[mRole]||'var(--light)';
               return `<div onclick="openUserProfile('${m.user_id}')" style="display:flex;align-items:center;gap:10px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;cursor:pointer">
                 ${avatarHtml(m.profile,nm,38)}
-                <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${nm}</div><div style="font-size:10px;color:var(--mid)">${escapeHtml(sub||'Fighter')}</div></div>
+                <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${nm}</div><div style="font-size:10px;color:${posColor};font-weight:600;text-transform:uppercase;letter-spacing:.5px">${posLabel}${detail?`<span style="color:var(--mid);font-weight:400;text-transform:none;letter-spacing:0"> · ${escapeHtml(detail)}</span>`:''}</div></div>
                 ${isOwner?`<button onclick="event.stopPropagation();declineGymMember('${m.id}','${g.id}')" style="background:transparent;border:none;color:var(--mid);font-size:11px;cursor:pointer">Remove</button>`:'<span style="color:var(--mid);font-size:16px">›</span>'}
               </div>`;
             }).join('');
           }
-          if(members.approved.length===0 && !(isOwner&&members.pending.length>0) && (isOwner||myMembership)){
-            out+=`<div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:22px;margin-bottom:6px">🥊</div><div style="font-size:12px;color:var(--mid);line-height:1.5">No fighters on the roster yet.${isOwner?' When fighters request to join, you can approve them here.':''}</div></div>`;
-          }
-          if(!out){
-            out=`<div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:18px;text-align:center"><div style="font-size:22px;margin-bottom:6px">🥊</div><div style="font-size:12px;color:var(--mid);line-height:1.5">No fighters on the roster yet.</div></div>`;
+          if(members.approved.length===0){
+            out+=`<div style="font-size:11px;color:var(--mid);text-align:center;padding:8px 14px;line-height:1.5">${isOwner?'No fighters yet. When someone requests to join, approve them here and they\'ll appear on the roster.':'No fighters on the roster yet.'}</div>`;
           }
           return out;
         })()}
@@ -1701,7 +1760,7 @@ function renderMain(){
   else if(tab==='reels')body=renderReelsFeed(role);
   else if(tab==='matchmaker')body=renderMatchmaker(role);
 
-  const nav=`<div class="nav-bar"><div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="setTab('inbox')">🔔<div class="nav-dot"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div></div>`;
+  const nav=`<div class="nav-bar"><div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="openNotifications()">🔔<div class="nav-dot" style="display:none"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div></div>`;
   const tabs=`<div class="bottom-tabs">`+profile.tabs.map(t=>`<button class="btab ${tab===t?'active':''}" onclick="setTab('${t}')">${ICONS[t]||ICONS.home}${TAB_LABELS[t]}</button>`).join('')+`</div>`;
   // Some screen functions already include their OWN nav-bar + inner-scroll
   // (e.g. profile, reels). For those, don't double-wrap — just add the account
@@ -1713,7 +1772,7 @@ function renderMain(){
     // (only if it doesn't already have action icons).
     body = body.replace(
       '<div class="nav-wordmark">ROUNDUP</div><div style="width:34px"></div>',
-      '<div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="setTab(\'inbox\')">🔔<div class="nav-dot"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div>'
+      '<div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="openNotifications()">🔔<div class="nav-dot" style="display:none"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div>'
     );
     // Some bodies (e.g. renderEmpty) already include their own bottom tab bar.
     // Only append tabs when the body doesn't already have one — prevents the
@@ -2409,7 +2468,7 @@ async function loadInbox(){
 // users can see what's coming without mistaking it for a working feature.
 function renderEventsComingSoon(){
   return `
-    <div class="nav-bar"><div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="setTab('inbox')">🔔<div class="nav-dot"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div></div>
+    <div class="nav-bar"><div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="openNotifications()">🔔<div class="nav-dot" style="display:none"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div></div>
     <div class="inner-scroll">
       <div style="padding:24px 18px 8px;text-align:center">
         <div style="font-size:40px;margin-bottom:8px">🥊</div>
@@ -8144,7 +8203,7 @@ function attachHandlers(){
     b.onclick=()=>{state.currentRole=b.dataset.role;state.currentScreen='main';state.drilldown=null;state.currentTab=ROLE_PROFILES[b.dataset.role].tabs[0];saveState();render();};
   });
 }
-function setTab(t){state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();if(t==='inbox'&&typeof loadInbox==='function')loadInbox();if(t==='find'&&typeof loadDirectory==='function')loadDirectory();if(t==='profile'&&typeof loadMyGyms==='function')loadMyGyms();}
+function setTab(t){state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();if(t==='inbox'&&typeof loadInbox==='function')loadInbox();if(t==='find'&&typeof loadDirectory==='function')loadDirectory();if(t==='profile'&&typeof loadMyGyms==='function')loadMyGyms();if(typeof loadMyNotifications==='function')loadMyNotifications();}
 function openConv(otherId){state.currentScreen='conversation';state.drilldown=otherId;state.dmThreadOtherId=null;state.dmThreadMsgs=[];render();setTimeout(()=>loadDMThread(otherId),0);}
 function openConversation(pid){openConv(pid);}
 function openUserProfile(id){state.currentScreen='profile_detail';state.drilldown=id;state.viewProfileId=null;state.viewProfile=null;state.viewProfileReels=[];saveState();render();setTimeout(()=>loadViewProfile(id),0);}
@@ -8364,6 +8423,7 @@ render();
         }
       }).catch(function(e){console.log('profile load skipped:',e&&e.message);});
       if(typeof loadMyGyms==='function')setTimeout(loadMyGyms,100);
+      if(typeof loadMyNotifications==='function')setTimeout(loadMyNotifications,300);
       // Push the real name into local state so the UI shows it everywhere.
       try{
         if(window.ruName && state && state.users && state.users.me){
