@@ -546,7 +546,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
       <button id="ruLoginBtn" class="ru-auth-btn">Log in</button>
       <div style="text-align:center;margin-top:10px"><span onclick="ruForgotPassword()" style="font-size:12px;color:var(--mid);cursor:pointer;text-decoration:underline">Forgot password?</span></div>
       <div class="ru-auth-switch">New here? <button onclick="ruShow('signup')">Create an account</button></div>
-      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v13 · loading…</div>
+      <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v15 · loading…</div>
     </div>
 
     <!-- SIGNUP -->
@@ -571,7 +571,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
   (function(){
     try{
       var t=document.getElementById('ruVersionTag');
-      if(t)t.textContent='build v13 · JS OK';
+      if(t)t.textContent='build v15 · JS OK';
     }catch(e){}
     window.addEventListener('error',function(ev){
       var t=document.getElementById('ruVersionTag');
@@ -1186,7 +1186,7 @@ async function deleteGym(gymId){
 }
 
 // Open a gym's public page.
-function openGymPage(gymId){
+function openGymPage(gymId){if(typeof stopAllReelVideos==='function')stopAllReelVideos();
   state.currentScreen='gym_page';
   state.drilldown=gymId;
   state.viewGymId=null; state.viewGym=null;
@@ -7179,6 +7179,39 @@ function paintLikeBtn(reel){
   btn.innerHTML=(reel.likedByMe?'❤️':'🤍')+' '+(reel.likeCount||0);
 }
 
+// Mute/unmute a single feed video. Unmuting one mutes all others so only one
+// plays sound at a time. Updates the button icon in place (no re-render).
+function toggleReelMute(reelId, ev){
+  if(ev){ev.stopPropagation();ev.preventDefault();}
+  const vid=document.getElementById('vid_'+reelId);
+  if(!vid)return;
+  const willUnmute=vid.muted;
+  if(willUnmute){
+    // mute every other reel video first
+    document.querySelectorAll('video[id^="vid_"]').forEach(function(v){
+      if(v!==vid){v.muted=true;}
+      const b=document.getElementById('mute_'+v.id.slice(4));
+      if(b&&v!==vid)b.textContent='🔇';
+    });
+  }
+  vid.muted=!vid.muted;
+  const btn=document.getElementById('mute_'+reelId);
+  if(btn)btn.textContent=vid.muted?'🔇':'🔊';
+}
+
+// Stop ALL video audio/playback everywhere in the app. Called when leaving the
+// reels feed so sound never follows you to another page.
+function stopAllReelVideos(){
+  document.querySelectorAll('video').forEach(function(v){
+    try{
+      // Don't touch the live recorder preview or review video.
+      if(v.id==='recPreview')return;
+      v.muted=true;
+      if(!v.paused && v.id && v.id.indexOf('vid_')===0){v.pause();}
+    }catch(e){}
+  });
+}
+
 // Share a reel into a chat: pick a person, then drop a message that links to
 // the reel. We send it as text with a [reel:ID] marker — the chat detects that
 // marker and renders a preview card. No new database column needed.
@@ -7308,7 +7341,10 @@ function renderReelsFeed(role){
               ${canDelete?`<button onclick="deleteReelDB('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:11px;color:var(--mid);font-family:'DM Sans',sans-serif">🗑 Delete</button>`:''}
             </div>
             ${r.media_url?(r.media_type==='video'
-              ? `<video src="${r.media_url}" muted autoplay loop playsinline onclick="this.muted=!this.muted" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block;background:#000;cursor:pointer"></video><div style="font-size:10px;color:var(--mid);margin:-6px 0 10px;text-align:center">🔊 Tap video to unmute</div>`
+              ? `<div style="position:relative;margin-bottom:10px">
+                  <video id="vid_${r.id}" src="${r.media_url}" muted autoplay loop playsinline preload="metadata" style="width:100%;border-radius:var(--r);display:block;background:#000"></video>
+                  <button onclick="toggleReelMute('${r.id}',event)" id="mute_${r.id}" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.65);color:#fff;border:none;width:38px;height:38px;border-radius:50%;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center">🔇</button>
+                </div>`
               : `<img src="${r.media_url}" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block" loading="lazy">`):''}
             ${r.caption?`<div style="font-size:13px;color:var(--lighter);line-height:1.5;margin-bottom:10px">${escapeHtml(r.caption)}</div>`:''}
             <div style="display:flex;gap:16px;align-items:center">
@@ -8543,10 +8579,10 @@ function attachHandlers(){
     b.onclick=()=>{state.currentRole=b.dataset.role;state.currentScreen='main';state.drilldown=null;state.currentTab=ROLE_PROFILES[b.dataset.role].tabs[0];saveState();render();};
   });
 }
-function setTab(t){state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();if(t==='inbox'&&typeof loadInbox==='function')loadInbox();if(t==='find'&&typeof loadDirectory==='function')loadDirectory();if(t==='profile'&&typeof loadMyGyms==='function')loadMyGyms();if(typeof loadMyNotifications==='function')loadMyNotifications();}
-function openConv(otherId){state.currentScreen='conversation';state.drilldown=otherId;state.dmThreadOtherId=null;state.dmThreadMsgs=[];render();setTimeout(()=>loadDMThread(otherId),0);}
+function setTab(t){if(typeof stopAllReelVideos==='function')stopAllReelVideos();state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();if(t==='inbox'&&typeof loadInbox==='function')loadInbox();if(t==='find'&&typeof loadDirectory==='function')loadDirectory();if(t==='profile'&&typeof loadMyGyms==='function')loadMyGyms();if(typeof loadMyNotifications==='function')loadMyNotifications();}
+function openConv(otherId){if(typeof stopAllReelVideos==='function')stopAllReelVideos();state.currentScreen='conversation';state.drilldown=otherId;state.dmThreadOtherId=null;state.dmThreadMsgs=[];render();setTimeout(()=>loadDMThread(otherId),0);}
 function openConversation(pid){openConv(pid);}
-function openUserProfile(id){state.currentScreen='profile_detail';state.drilldown=id;state.viewProfileId=null;state.viewProfile=null;state.viewProfileReels=[];saveState();render();setTimeout(()=>loadViewProfile(id),0);}
+function openUserProfile(id){if(typeof stopAllReelVideos==='function')stopAllReelVideos();state.currentScreen='profile_detail';state.drilldown=id;state.viewProfileId=null;state.viewProfile=null;state.viewProfileReels=[];saveState();render();setTimeout(()=>loadViewProfile(id),0);}
 function openEvent(id){state.currentScreen='event_detail';state.drilldown=id;saveState();render();}
 function goBack(){state.currentScreen='main';state.drilldown=null;saveState();render();if(state.currentTab==='inbox')setTimeout(loadInbox,0);}
 function openInvestorView(){closeAdmin();state.currentScreen='investor_analytics';state.drilldown=null;render();}
@@ -8752,13 +8788,17 @@ render();
       }catch(e){console.log('profile ensure error:',e&&e.message);}
       // Load the saved profile photo + self-listed role (if any) after refresh.
       // Fully non-fatal: any failure here just means we fall back to metadata.
-      db.from('profiles').select('display_name,avatar_url,role,role_info').eq('id',res.data.user.id).limit(1).then(function(pr){
+      db.from('profiles').select('display_name,avatar_url,role,role_info,is_admin').eq('id',res.data.user.id).limit(1).then(function(pr){
         var row=pr&&pr.data&&pr.data[0];
         if(row){
           if(row.avatar_url)window.ruAvatarUrl=row.avatar_url;
           if(row.display_name)window.ruName=row.display_name;
           window.ruRole=row.role||null;
           window.ruRoleInfo=row.role_info||{};
+          // Real admin gate: if this account is marked is_admin in Supabase,
+          // unlock moderation tools (delete any reel/comment, etc.).
+          window.ruIsAdmin = !!row.is_admin;
+          if(row.is_admin && typeof window.ruUnlockAdmin==='function'){window.ruUnlockAdmin(false);}
           if(typeof render==='function')render();
         }
       }).catch(function(e){console.log('profile load skipped:',e&&e.message);});
