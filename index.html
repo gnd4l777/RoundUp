@@ -72,15 +72,118 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 .profile-menu-item.danger{color:var(--red);border-color:rgba(232,37,26,.35);background:rgba(232,37,26,.08);}
 
 /* ===================== AUTH GATE styling ===================== */
-#ruAuth{position:fixed;inset:0;z-index:5000;background:radial-gradient(circle at 50% 0%,#1a1a1a 0%,#000 70%);
-  display:flex;align-items:center;justify-content:center;padding:24px;}
+#ruAuth{position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;overflow:hidden;}
 #ruAuth.ru-hidden{display:none;}
-.ru-auth-card{width:100%;max-width:360px;background:var(--dark2);border:1px solid var(--dark3);border-radius:18px;padding:30px 24px;box-shadow:0 24px 80px rgba(0,0,0,.6);}
+
+/* Background layer — visual only, sits behind the card */
+.ru-auth-bg{
+  position:absolute;inset:0;
+  background:linear-gradient(160deg,#1a0000 0%,#0d0d0d 50%,#000 100%);
+  padding:28px 20px;
+  display:flex;flex-direction:column;gap:16px;
+  overflow:hidden;
+  pointer-events:none;
+  user-select:none;
+}
+.ru-auth-bg-glow{
+  position:absolute;top:-60px;left:50%;transform:translateX(-50%);
+  width:300px;height:300px;
+  background:radial-gradient(circle,rgba(232,37,26,.22) 0%,transparent 70%);
+  pointer-events:none;
+}
+.ru-auth-bg-wordmark{
+  font-family:'Bebas Neue',sans-serif;font-size:64px;letter-spacing:8px;
+  color:rgba(232,37,26,.18);line-height:1;
+}
+.ru-auth-bg-tagline{
+  font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;
+  color:rgba(255,255,255,.12);line-height:1.2;
+}
+.ru-auth-bg-tagline span{color:rgba(232,37,26,.25);}
+
+/* Sport pills in background */
+.ru-auth-sports{
+  display:flex;gap:8px;flex-wrap:wrap;
+}
+.ru-auth-sport-pill{
+  display:flex;align-items:center;gap:5px;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
+  border-radius:20px;padding:5px 11px;font-size:11px;font-weight:600;
+  color:rgba(255,255,255,.25);white-space:nowrap;
+}
+.ru-auth-sport-pill.active{
+  background:rgba(232,37,26,.1);border-color:rgba(232,37,26,.2);
+  color:rgba(232,37,26,.5);
+}
+
+/* Preview cards in background */
+.ru-auth-previews{
+  display:flex;gap:10px;
+}
+.ru-auth-preview-card{
+  flex:1;min-width:0;
+  background:rgba(22,22,22,.6);border:1px solid rgba(255,255,255,.06);
+  border-radius:12px;overflow:hidden;opacity:.7;
+}
+.ru-auth-preview-header{
+  background:rgba(232,37,26,.08);padding:7px 9px;
+  border-bottom:1px solid rgba(255,255,255,.05);
+}
+.ru-auth-preview-title{font-size:9px;font-weight:600;color:rgba(255,255,255,.5);letter-spacing:.3px;}
+.ru-auth-preview-sub{font-size:8px;color:rgba(255,255,255,.25);margin-top:1px;}
+.ru-auth-preview-body{padding:7px 9px;}
+.ru-auth-preview-row{
+  display:flex;align-items:center;gap:5px;
+  padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);
+}
+.ru-auth-preview-row:last-child{border-bottom:none;}
+.ru-auth-preview-av{
+  width:20px;height:20px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Bebas Neue',sans-serif;font-size:7px;
+}
+.ru-auth-preview-info{flex:1;min-width:0;}
+.ru-auth-preview-name{font-size:9px;font-weight:600;color:rgba(255,255,255,.4);line-height:1.2;}
+.ru-auth-preview-detail{font-size:8px;color:rgba(255,255,255,.2);line-height:1.2;}
+.ru-auth-preview-tag{font-size:7px;font-weight:600;padding:1px 4px;border-radius:3px;white-space:nowrap;}
+
+/* Feature bullets in background */
+.ru-auth-features{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
+.ru-auth-feature{
+  display:flex;align-items:flex-start;gap:6px;
+  background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);
+  border-radius:9px;padding:8px 9px;
+}
+.ru-auth-feature-icon{font-size:13px;flex-shrink:0;opacity:.5;}
+.ru-auth-feature-text{font-size:9px;color:rgba(255,255,255,.25);line-height:1.4;}
+.ru-auth-feature-text strong{display:block;color:rgba(255,255,255,.35);font-size:9px;margin-bottom:1px;}
+
+/* Dark overlay between background and card */
+.ru-auth-overlay{
+  position:absolute;inset:0;
+  background:rgba(0,0,0,.55);
+  backdrop-filter:blur(3px);
+  -webkit-backdrop-filter:blur(3px);
+}
+
+/* The actual login card — floats centered on top */
+.ru-auth-card{
+  position:relative;z-index:10;
+  width:calc(100% - 48px);max-width:360px;
+  max-height:92vh;overflow-y:auto;
+  background:rgba(18,18,18,.96);
+  backdrop-filter:blur(24px);
+  -webkit-backdrop-filter:blur(24px);
+  border:1px solid rgba(255,255,255,.13);
+  border-radius:20px;
+  padding:30px 24px 28px;
+  box-shadow:0 32px 80px rgba(0,0,0,.85),0 0 0 1px rgba(232,37,26,.08);
+}
 .ru-auth-wordmark{font-family:'Bebas Neue',sans-serif;font-size:40px;letter-spacing:4px;color:var(--red);text-align:center;line-height:1;}
-.ru-auth-tag{text-align:center;color:var(--light);font-size:12px;letter-spacing:1px;margin:6px 0 22px;text-transform:uppercase;}
-.ru-auth-input{width:100%;box-sizing:border-box;background:var(--dark);border:1px solid var(--dark4);border-radius:10px;
+.ru-auth-tag{text-align:center;color:var(--light);font-size:11px;letter-spacing:1px;margin:4px 0 22px;text-transform:uppercase;}
+.ru-auth-input{width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;
   color:var(--white);font-family:'DM Sans',sans-serif;font-size:15px;padding:13px 14px;margin-bottom:10px;outline:none;}
-.ru-auth-input:focus{border-color:var(--red);}
+.ru-auth-input:focus{border-color:var(--red);background:rgba(255,255,255,.07);}
 .ru-auth-btn{width:100%;background:var(--red);color:#fff;border:none;border-radius:10px;font-family:'DM Sans',sans-serif;
   font-size:15px;font-weight:600;padding:14px;cursor:pointer;margin-top:4px;}
 .ru-auth-btn:active{background:var(--red-dim);}
@@ -531,15 +634,106 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 </head>
 <body>
 
-<!-- ===================== AUTH GATE (Stage 1) ===================== -->
+<!-- ===================== AUTH GATE ===================== -->
 <div id="ruAuth">
+
+  <!-- ── Background layer (visual only, behind everything) ── -->
+  <div class="ru-auth-bg">
+    <div class="ru-auth-bg-glow"></div>
+
+    <div class="ru-auth-bg-wordmark">ROUNDUP</div>
+    <div class="ru-auth-bg-tagline">Your sport.<br>Your <span>community.</span><br>All in one place.</div>
+
+    <div class="ru-auth-sports">
+      <div class="ru-auth-sport-pill active">🥊 Boxing</div>
+      <div class="ru-auth-sport-pill">🦵 Kickboxing</div>
+      <div class="ru-auth-sport-pill">🏆 Muay Thai</div>
+      <div class="ru-auth-sport-pill">⚡ MMA</div>
+      <div class="ru-auth-sport-pill">🤼 BJJ</div>
+      <div class="ru-auth-sport-pill">👊 Bare Knuckle</div>
+    </div>
+
+    <div class="ru-auth-previews">
+      <div class="ru-auth-preview-card">
+        <div class="ru-auth-preview-header">
+          <div class="ru-auth-preview-title">Find Members</div>
+          <div class="ru-auth-preview-sub">Fighters · Coaches · Gyms</div>
+        </div>
+        <div class="ru-auth-preview-body">
+          <div class="ru-auth-preview-row">
+            <div class="ru-auth-preview-av" style="background:rgba(232,37,26,.2);color:#e8251a">JR</div>
+            <div class="ru-auth-preview-info"><div class="ru-auth-preview-name">Jam Rock</div><div class="ru-auth-preview-detail">Boxing · 155 lbs</div></div>
+            <div class="ru-auth-preview-tag" style="background:rgba(232,37,26,.2);color:#e8251a">Fighter</div>
+          </div>
+          <div class="ru-auth-preview-row">
+            <div class="ru-auth-preview-av" style="background:rgba(245,166,35,.2);color:#f5a623">HC</div>
+            <div class="ru-auth-preview-info"><div class="ru-auth-preview-name">HAC Gym</div><div class="ru-auth-preview-detail">Tulsa, OK · Boxing</div></div>
+            <div class="ru-auth-preview-tag" style="background:rgba(245,166,35,.2);color:#f5a623">Gym</div>
+          </div>
+          <div class="ru-auth-preview-row">
+            <div class="ru-auth-preview-av" style="background:rgba(127,119,221,.2);color:#7f77dd">RJ</div>
+            <div class="ru-auth-preview-info"><div class="ru-auth-preview-name">Rock Jam</div><div class="ru-auth-preview-detail">Head Coach · Boxing</div></div>
+            <div class="ru-auth-preview-tag" style="background:rgba(127,119,221,.2);color:#7f77dd">Coach</div>
+          </div>
+          <div class="ru-auth-preview-row">
+            <div class="ru-auth-preview-av" style="background:rgba(42,127,232,.2);color:#2a7fe8">KD</div>
+            <div class="ru-auth-preview-info"><div class="ru-auth-preview-name">K. Davis</div><div class="ru-auth-preview-detail">MMA · Welterweight</div></div>
+            <div class="ru-auth-preview-tag" style="background:rgba(232,37,26,.2);color:#e8251a">Fighter</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ru-auth-preview-card">
+        <div class="ru-auth-preview-header">
+          <div class="ru-auth-preview-title">Reels Feed</div>
+          <div class="ru-auth-preview-sub">Highlights & clips</div>
+        </div>
+        <div class="ru-auth-preview-body">
+          <div style="background:linear-gradient(135deg,#1a0000,#0d1a2d);border-radius:6px;height:52px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:6px">🥊</div>
+          <div style="font-size:9px;font-weight:600;color:rgba(255,255,255,.45);margin-bottom:1px">Sparring at HAC</div>
+          <div style="font-size:8px;color:rgba(255,255,255,.2);margin-bottom:6px">Jam Rock · 2h ago</div>
+          <div style="display:flex;gap:10px;font-size:8px;color:rgba(255,255,255,.25)">
+            <span style="color:rgba(232,37,26,.6)">♥ 24</span><span>💬 6</span><span>↗ Share</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="ru-auth-preview-card">
+        <div class="ru-auth-preview-header">
+          <div class="ru-auth-preview-title">Your Profile</div>
+          <div class="ru-auth-preview-sub">Role · Verification</div>
+        </div>
+        <div class="ru-auth-preview-body">
+          <div style="background:rgba(232,37,26,.08);border:1px solid rgba(232,37,26,.15);border-radius:5px;padding:5px 7px;margin-bottom:5px">
+            <div style="font-size:8px;font-weight:600;color:rgba(232,37,26,.6)">🥊 Fighter — Self-listed</div>
+            <div style="font-size:7px;color:rgba(255,255,255,.25);margin-top:1px">Amateur · Boxing · 147 lbs</div>
+          </div>
+          <div style="background:rgba(29,184,122,.08);border:1px solid rgba(29,184,122,.15);border-radius:5px;padding:5px 7px">
+            <div style="font-size:8px;font-weight:600;color:rgba(29,184,122,.6)">✓ Verification requested</div>
+            <div style="font-size:7px;color:rgba(255,255,255,.25);margin-top:1px">On the list for launch</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ru-auth-features">
+      <div class="ru-auth-feature"><div class="ru-auth-feature-icon">🔎</div><div class="ru-auth-feature-text"><strong>Find anyone</strong>Fighters, coaches, gyms & officials.</div></div>
+      <div class="ru-auth-feature"><div class="ru-auth-feature-icon">🎬</div><div class="ru-auth-feature-text"><strong>Post reels</strong>Share training & highlight clips.</div></div>
+      <div class="ru-auth-feature"><div class="ru-auth-feature-icon">💬</div><div class="ru-auth-feature-text"><strong>Direct messages</strong>Connect with anyone on the platform.</div></div>
+      <div class="ru-auth-feature"><div class="ru-auth-feature-icon">✅</div><div class="ru-auth-feature-text"><strong>Get verified</strong>Join the queue. Badges at launch.</div></div>
+    </div>
+  </div>
+
+  <!-- ── Dark blur overlay ── -->
+  <div class="ru-auth-overlay"></div>
+
+  <!-- ── Floating login card — centered on top of everything ── -->
   <div class="ru-auth-card">
     <div class="ru-auth-wordmark">ROUNDUP</div>
     <div class="ru-auth-tag">Combat Sports — Preview</div>
 
     <div id="ruAuthError" class="ru-auth-error" style="display:none"></div>
 
-    <!-- LOGIN -->
     <div id="ruLoginForm">
       <input id="ruLoginEmail" class="ru-auth-input" type="email" placeholder="Email" autocomplete="email">
       <input id="ruLoginPass" class="ru-auth-input" type="password" placeholder="Password" autocomplete="current-password">
@@ -549,7 +743,6 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
       <div id="ruVersionTag" style="text-align:center;margin-top:14px;font-size:10px;color:var(--mid);opacity:.6">build v15 · loading…</div>
     </div>
 
-    <!-- SIGNUP -->
     <div id="ruSignupForm" style="display:none">
       <input id="ruSuName" class="ru-auth-input" type="text" placeholder="Display name (e.g. Marcus Williams)" autocomplete="name">
       <input id="ruSuUser" class="ru-auth-input" type="text" placeholder="Username (e.g. marcusw)" autocomplete="username">
@@ -562,6 +755,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 
     <div id="ruAuthBusy" class="ru-auth-busy" style="display:none">Working…</div>
   </div>
+
 </div>
 <script>
   // Independent probe: proves the page's JavaScript runs at all, separate from
