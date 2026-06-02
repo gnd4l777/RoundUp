@@ -9,7 +9,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-title" content="RoundUp">
-<title>RoundUp v2.0 Final — Amateur Boxing · USA Boxing LBC #27 · Tulsa, OK</title>
+<title>RoundUp — Combat Sports · Tulsa, OK</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -535,7 +535,7 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 <div id="ruAuth">
   <div class="ru-auth-card">
     <div class="ru-auth-wordmark">ROUNDUP</div>
-    <div class="ru-auth-tag">Amateur Boxing — Preview</div>
+    <div class="ru-auth-tag">Combat Sports — Preview</div>
 
     <div id="ruAuthError" class="ru-auth-error" style="display:none"></div>
 
@@ -2270,7 +2270,7 @@ function renderDirectory(){
   };
 
   return `
-    <div class="search-bar"><span style="font-size:14px">🔎</span><input class="search-input" placeholder="Browse RoundUp members..."></div>
+    <div class="search-bar"><span style="font-size:14px">🔎</span><input class="search-input" placeholder="Browse fighters, gyms, coaches by sport..."></div>
     ${head}
     <div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px">
       ${gymsToShow.map(gymCard).join('')}
@@ -2521,7 +2521,7 @@ function renderEventsComingSoon(){
         <div style="font-size:40px;margin-bottom:8px">🥊</div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:30px;letter-spacing:1px;color:var(--white);line-height:1">Sanctioned Events<br>Coming Soon</div>
         <div style="font-size:13px;color:var(--light);line-height:1.6;margin-top:12px;max-width:340px;margin-left:auto;margin-right:auto">
-          RoundUp is starting as a place for Tulsa's amateur boxing community to post, connect, and follow each other. Live events are on the way — we're building them carefully and working toward USA Boxing LBC #27 sanctioning so they're done right.
+          RoundUp is building a home for Tulsa's entire combat sports community — boxing, MMA, kickboxing, and more. Live events are on the way, sanctioned under USA Boxing LBC #27 (amateur boxing) and OSAC (pro boxing, MMA, and kickboxing) so they're done right.
         </div>
       </div>
 
@@ -3291,7 +3291,7 @@ function renderInvestorAnalytics(){
     <div class="inner-scroll">
       <div style="padding:14px 18px 0">
         <div style="font-size:10px;color:var(--gold);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">RoundUp · Platform Analytics</div>
-        <div style="font-size:12px;color:var(--light);line-height:1.5;margin-bottom:14px">OSAC-compliant · Tulsa, OK · Amateur boxing · Soft launch</div>
+        <div style="font-size:12px;color:var(--light);line-height:1.5;margin-bottom:14px">OSAC-compliant · Tulsa, OK · Combat Sports · Soft launch</div>
       </div>
       <div class="sponsor-stat-grid" style="padding:0 18px 14px">
         <div class="sponsor-stat"><div class="sponsor-stat-l">Licensed fighters</div><div class="sponsor-stat-v">${a.totalFighters}</div><div class="sponsor-stat-trend">Verified w/ OSAC</div></div>
@@ -6212,9 +6212,9 @@ function renderCreatorHome(){
     <div class="hero">
       <div class="hero-bg-text">ROUNDUP</div>
       <div class="hero-content">
-        <div class="hero-eyebrow">📍 Tulsa, OK · Amateur Boxing</div>
+        <div class="hero-eyebrow">📍 Tulsa, OK · Combat Sports</div>
         <div class="hero-title">Welcome to<br>RoundUp</div>
-        <div style="font-size:12px;color:rgba(255,255,255,.7);margin:6px 0 4px;line-height:1.5;max-width:300px">The home for Tulsa's amateur boxing community. Post, follow, and connect — events and tickets coming soon.</div>
+        <div style="font-size:12px;color:rgba(255,255,255,.7);margin:6px 0 4px;line-height:1.5;max-width:300px">The home for Tulsa's combat sports community. Post, follow, and connect — all disciplines, all levels.</div>
         <div class="hero-cta">
           <button class="btn-primary" onclick="setTab('reels')">Watch Reels</button>
           <button class="btn-secondary" onclick="openProfileMenu()">Set Up Profile</button>
@@ -6256,10 +6256,10 @@ function renderCreatorHome(){
     <div style="padding:0 18px 4px;font-size:11px;color:var(--mid);line-height:1.5;margin-bottom:8px">More is on the way for RoundUp. Here's what we're building next:</div>
     <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px">
       ${[
-        ['🎟','Live event tickets','Buy tickets to sanctioned Tulsa fight cards right in the app.'],
+        ['🎟','Live event tickets','Buy tickets to sanctioned fight cards right in the app.'],
         ['🥊','Verified fighter profiles','Official verified records, rankings, and upcoming bouts.'],
         ['💳','Subscriptions','Support your favorite fighters and gyms with monthly tiers.'],
-        ['⚖','Sanctioned events','Full cards run with USA Boxing LBC #27 officials and rules.'],
+        ['⚖','Sanctioned events','Cards sanctioned under USA Boxing (amateur boxing) and OSAC (pro boxing, MMA, kickboxing).'],
       ].map(([ic,t,d])=>`
         <div style="display:flex;gap:12px;align-items:flex-start;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:12px 14px">
           <span style="font-size:18px;flex-shrink:0">${ic}</span>
@@ -7071,7 +7071,7 @@ async function loadReelsFromDB(){
       .select('id,caption,media_url,media_type,created_at,author_id')
       .order('created_at',{ascending:false})
       .limit(100);
-    if(error)throw error;
+    if(error)throw new Error(error.message||'Failed to load reels');
     let reels=data||[];
     // Attach author info with a separate lookup (no embed needed).
     const ids=[...new Set(reels.map(r=>r.author_id).filter(Boolean))];
@@ -7096,7 +7096,6 @@ async function loadReelsFromDB(){
       likeCount:likeCount[r.id]||0, likedByMe:!!likedByMe[r.id]}));
   }catch(e){
     console.log('loadReels error:',e&&e.message);
-    alert('Could not load reels: '+(e&&e.message||e));
   }
   state.reelsLoading=false;
   if(state.currentTab==='reels')render();
