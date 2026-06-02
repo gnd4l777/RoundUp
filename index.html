@@ -928,33 +928,120 @@ async function saveProfile(){
 }
 
 // ===== Self-listed roles (Option A) =====
-const COMBAT_SPORTS=['Boxing','MMA','Kickboxing','Muay Thai'];
+// The 6 sports RoundUp supports at launch
+const COMBAT_SPORTS=['Boxing','Kickboxing','Muay Thai','MMA','BJJ / Jiu-Jitsu','Bare Knuckle Fighting'];
+
+// Sports where stance (Orthodox/Southpaw) is relevant — all striking sports
+const STANCE_SPORTS=new Set(['Boxing','Kickboxing','Muay Thai','MMA','Bare Knuckle Fighting']);
+
+// Sports that use standard named weight classes
+const SPORTS_WITH_WEIGHT_CLASSES=new Set(['Boxing','Kickboxing','Muay Thai','MMA','Bare Knuckle Fighting','BJJ / Jiu-Jitsu']);
+
+// Bare Knuckle Fighting is professional-only (no recognized amateur governing body)
+const PRO_ONLY_SPORTS=new Set(['Bare Knuckle Fighting']);
+
+const WEIGHT_CLASSES_BY_SPORT={
+  Boxing:['Minimumweight (105 lbs)','Light Flyweight (108 lbs)','Flyweight (112 lbs)','Super Flyweight (115 lbs)','Bantamweight (118 lbs)','Super Bantamweight (122 lbs)','Featherweight (126 lbs)','Super Featherweight (130 lbs)','Lightweight (135 lbs)','Super Lightweight (140 lbs)','Welterweight (147 lbs)','Super Welterweight (154 lbs)','Middleweight (160 lbs)','Super Middleweight (168 lbs)','Light Heavyweight (175 lbs)','Cruiserweight (200 lbs)','Heavyweight (200+ lbs)'],
+  MMA:['Strawweight (115 lbs)','Flyweight (125 lbs)','Bantamweight (135 lbs)','Featherweight (145 lbs)','Lightweight (155 lbs)','Welterweight (170 lbs)','Middleweight (185 lbs)','Light Heavyweight (205 lbs)','Heavyweight (265 lbs)'],
+  Kickboxing:['Bantamweight (118 lbs)','Super Bantamweight (122 lbs)','Featherweight (126 lbs)','Super Featherweight (130 lbs)','Lightweight (135 lbs)','Super Lightweight (140 lbs)','Welterweight (147 lbs)','Super Welterweight (154 lbs)','Middleweight (160 lbs)','Super Middleweight (168 lbs)','Light Heavyweight (175 lbs)','Heavyweight (200+ lbs)'],
+  'Muay Thai':['Flyweight (112 lbs)','Super Flyweight (115 lbs)','Bantamweight (118 lbs)','Super Bantamweight (122 lbs)','Featherweight (126 lbs)','Lightweight (135 lbs)','Welterweight (147 lbs)','Middleweight (160 lbs)','Light Heavyweight (175 lbs)','Heavyweight (200+ lbs)'],
+  'BJJ / Jiu-Jitsu':['Rooster (127.5 lbs)','Light Feather (141.5 lbs)','Feather (154 lbs)','Light (167.5 lbs)','Middle (181.5 lbs)','Medium Heavy (195.5 lbs)','Heavy (209 lbs)','Super Heavy (222.5 lbs)','Ultra Heavy (222.5+ lbs)'],
+  'Bare Knuckle Fighting':['Bantamweight (118 lbs)','Featherweight (126 lbs)','Lightweight (135 lbs)','Welterweight (147 lbs)','Middleweight (160 lbs)','Light Heavyweight (175 lbs)','Cruiserweight (200 lbs)','Heavyweight (200+ lbs)'],
+};
+
+const COACH_SPECIALTIES={
+  Boxing:['Head Coach','Cutman','Strength & Conditioning','Cornerman','Pad Work Specialist'],
+  MMA:['Head Coach','Striking Coach','Grappling Coach','Strength & Conditioning','Cornerman'],
+  Kickboxing:['Head Coach','Pad Work Specialist','Cornerman','Strength & Conditioning'],
+  'Muay Thai':['Head Coach','Pad Work Specialist','Cornerman','Kru (Trainer)','Strength & Conditioning'],
+  'BJJ / Jiu-Jitsu':['Head Instructor','Assistant Instructor','Strength & Conditioning'],
+  'Bare Knuckle Fighting':['Head Coach','Cutman','Cornerman','Strength & Conditioning'],
+  _default:['Head Coach','Assistant Coach','Strength & Conditioning','Cornerman'],
+};
+
+const OFFICIAL_TYPES={
+  Boxing:['Referee','Judge','Timekeeper','Ring Announcer','Inspector','Ringside Physician'],
+  MMA:['Referee','Judge','Inspector','Ringside Physician'],
+  Kickboxing:['Referee','Judge','Timekeeper','Ring Announcer','Inspector','Ringside Physician'],
+  'Muay Thai':['Referee','Judge','Timekeeper','Ring Announcer','Inspector','Ringside Physician'],
+  'BJJ / Jiu-Jitsu':['Head Referee','Referee','Table Official'],
+  'Bare Knuckle Fighting':['Referee','Judge','Timekeeper','Ring Announcer','Inspector','Ringside Physician'],
+  _default:['Referee','Judge','Inspector','Ringside Physician'],
+};
+
+// Plain-English sport descriptions shown in forms and on the home page
+const SPORT_INFO={
+  Boxing:{
+    emoji:'🥊',
+    tagline:'Fists only — the original combat sport',
+    desc:'Two fighters, padded gloves, punches above the waist only. Fights are won by KO, TKO, or judges\' scorecards.',
+    levels:'Amateur (USA Boxing / LBC #27) or Professional (OSAC)',
+    body:'Oklahoma: USA Boxing LBC #27 (amateur) · OSAC (professional)',
+  },
+  Kickboxing:{
+    emoji:'🦵',
+    tagline:'Fists and kicks — boxing with legs',
+    desc:'Like boxing but kicks are legal. Fighters wear gloves and sometimes shin guards. Fought on a raised ring.',
+    levels:'Amateur or Professional',
+    body:'Oklahoma: OSAC regulates all kickboxing events',
+  },
+  'Muay Thai':{
+    emoji:'🏆',
+    tagline:'The Art of Eight Limbs',
+    desc:'Uses fists, elbows, knees, and kicks — all eight contact points. Clinch fighting and knee strikes set it apart from kickboxing.',
+    levels:'Amateur or Professional',
+    body:'Oklahoma: OSAC regulates Muay Thai events',
+  },
+  'MMA':{
+    emoji:'⚡',
+    tagline:'Striking + grappling — no limits',
+    desc:'Combines boxing, kickboxing, wrestling, and ground grappling. Fights can stand up, against the cage, or on the ground.',
+    levels:'Amateur or Professional',
+    body:'Oklahoma: OSAC regulates all MMA events',
+  },
+  'BJJ / Jiu-Jitsu':{
+    emoji:'🤼',
+    tagline:'Ground game — no strikes, all submissions',
+    desc:'Grappling-only. No punches or kicks. Win by submission (choke or joint lock) or points. Competed in a gi (uniform) or no-gi.',
+    levels:'Amateur or Professional',
+    body:'Governed by private bodies (IBJJF, ADCC, NAGA). Not currently regulated by OSAC.',
+  },
+  'Bare Knuckle Fighting':{
+    emoji:'👊',
+    tagline:'Boxing without gloves — professional only',
+    desc:'Boxing-style rules but without padded gloves. Fists only, fought in a smaller circular ring called a "knuckle pit." Professional events only.',
+    levels:'Professional only',
+    body:'Oklahoma: OSAC regulated. ABC Unified BKF Rules apply. No recognized amateur governing body.',
+  },
+};
 
 // Field definitions per role. 'req' marks required fields.
 function roleFields(roleId){
   switch(roleId){
     case 'fighter': return [
+      {k:'level',label:'Competition level',type:'select',opts:['Amateur','Professional'],req:true},
       {k:'sport',label:'Combat sport',type:'select',opts:COMBAT_SPORTS,req:true},
       {k:'height',label:'Height (e.g. 5\'9")',type:'text',req:true},
-      {k:'weight',label:'Weight (lbs)',type:'number',req:true},
+      {k:'weight',label:'Weight in lbs',type:'number',req:true},
+      {k:'weightClass',label:'Weight class',type:'weightclass',req:false},
       {k:'gym',label:'Gym',type:'gym',req:false},
       {k:'record',label:'Record (W-L-D, optional)',type:'text',req:false},
-      {k:'stance',label:'Stance (optional)',type:'select',opts:['Orthodox','Southpaw','Switch'],req:false},
+      {k:'stance',label:'Stance (optional)',type:'stance',req:false},
     ];
     case 'gym': return [
       {k:'name',label:'Gym name',type:'text',req:true},
       {k:'location',label:'Location (city/area)',type:'text',req:true},
       {k:'team',label:'Team / who trains here',type:'text',req:false},
-      {k:'sports',label:'Combat sports offered',type:'select',opts:COMBAT_SPORTS,req:false},
+      {k:'sports',label:'Primary combat sport',type:'select',opts:COMBAT_SPORTS,req:false},
     ];
     case 'coach': return [
       {k:'sport',label:'Combat sport',type:'select',opts:COMBAT_SPORTS,req:true},
-      {k:'specialty',label:'Specialty',type:'select',opts:['Head Coach','Cutman','Strength & Conditioning','Cornerman'],req:true},
+      {k:'specialty',label:'Specialty',type:'specialty',req:true},
       {k:'gym',label:'Gym',type:'gym',req:false},
     ];
     case 'official': return [
-      {k:'type',label:'Official type',type:'select',opts:['Referee','Judge','Timekeeper','Ring Announcer','Inspector','Physician'],req:true},
       {k:'sport',label:'Combat sport',type:'select',opts:COMBAT_SPORTS,req:true},
+      {k:'type',label:'Official type',type:'officialtype',req:true},
       {k:'years',label:'Years of experience (optional)',type:'number',req:false},
     ];
     case 'sponsor': return [
@@ -984,32 +1071,80 @@ async function openRoleForm(roleId){
   }
   let m=document.getElementById('ruRoleForm');
   if(!m){m=document.createElement('div');m.id='ruRoleForm';m.className='modal-bg';m.onclick=function(e){if(e.target===m)m.style.display='none';};document.body.appendChild(m);}
+  const sel='width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:\'DM Sans\',sans-serif;margin-top:5px;box-sizing:border-box';
   const fieldHtml=fields.map(f=>{
     const val=(info[f.k]!=null?info[f.k]:'');
     const reqMark=f.req?' <span style="color:var(--red)">*</span>':'';
     if(f.type==='select'){
-      return `<label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">${f.label}${reqMark}</label>
-        <select id="rf_${f.k}" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
+      const onch=f.k==='sport'?` onchange="ruSportChanged('${roleId}')"` :'';
+      const extra=f.k==='sport'?`<div id="rf_sport_desc"></div>`:'';
+      const wrapStart=f.k==='level'?`<div id="rf_level_wrap">`:'';
+      const wrapEnd=f.k==='level'?`</div>`:'';
+      return `${wrapStart}<label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">${f.label}${reqMark}</label>
+        <select id="rf_${f.k}"${onch} style="${sel}">
           <option value="">— Select —</option>
           ${f.opts.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
-        </select>`;
+        </select>${extra}${wrapEnd}`;
     }
     if(f.type==='gym'){
       return `<label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">${f.label}${reqMark}</label>
-        <select id="rf_${f.k}" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
+        <select id="rf_${f.k}" style="${sel}">
           <option value="Independent / not listed yet" ${(!val||val==='Independent / not listed yet')?'selected':''}>Independent / not listed yet</option>
           ${gymOpts.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
         </select>
         <div style="font-size:10px;color:var(--mid);margin-top:4px">Only gyms listed on RoundUp appear here. If yours isn't listed, ask them to create a Gym profile, or stay Independent for now.</div>`;
     }
+    if(f.type==='weightclass'){
+      const sport=info.sport||'';
+      const show=SPORTS_WITH_WEIGHT_CLASSES.has(sport);
+      const opts=WEIGHT_CLASSES_BY_SPORT[sport]||[];
+      return `<div id="rf_weightClass_wrap" style="${show?'':'display:none'}">
+        <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">${f.label}</label>
+        <select id="rf_weightClass" style="${sel}">
+          <option value="">— Select —</option>
+          ${opts.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+        </select></div>`;
+    }
+    if(f.type==='stance'){
+      const sport=info.sport||'';
+      const show=STANCE_SPORTS.has(sport);
+      return `<div id="rf_stance_wrap" style="${show?'':'display:none'}">
+        <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">${f.label}</label>
+        <select id="rf_stance" style="${sel}">
+          <option value="">— Select —</option>
+          ${['Orthodox','Southpaw','Switch'].map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+        </select></div>`;
+    }
+    if(f.type==='specialty'){
+      const sport=info.sport||'';
+      const opts=COACH_SPECIALTIES[sport]||COACH_SPECIALTIES._default;
+      return `<label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">${f.label}${reqMark}</label>
+        <select id="rf_specialty" style="${sel}">
+          <option value="">— Select —</option>
+          ${opts.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+        </select>`;
+    }
+    if(f.type==='officialtype'){
+      const sport=info.sport||'';
+      const opts=OFFICIAL_TYPES[sport]||OFFICIAL_TYPES._default;
+      return `<label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">${f.label}${reqMark}</label>
+        <select id="rf_type" style="${sel}">
+          <option value="">— Select —</option>
+          ${opts.map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+        </select>`;
+    }
     return `<label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">${f.label}${reqMark}</label>
-      <input id="rf_${f.k}" type="${f.type}" value="${String(val).replace(/"/g,'&quot;')}" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">`;
+      <input id="rf_${f.k}" type="${f.type}" value="${String(val).replace(/"/g,'&quot;')}" style="${sel}">`;
   }).join('');
   m.innerHTML=`
     <div class="modal" style="text-align:left;max-height:85vh;overflow-y:auto">
       <div class="modal-handle"></div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white)">List as ${ROLE_LABELS[roleId]}</div>
       <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">⏳ Self-listed for early access — not verified by RoundUp. You'll submit real credentials when events launch.</div>
+      ${roleId==='fighter'?`<div style="background:rgba(42,127,232,.06);border:1px solid rgba(42,127,232,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:0 0 4px">⚖ <strong style="color:var(--blue)">Oklahoma regulation:</strong> Boxing, MMA, and Kickboxing are regulated by OSAC. Amateur boxing is also governed by USA Boxing LBC #27. Wrestling, BJJ, Judo, Grappling, Karate, and Taekwondo are self-governed by their own bodies — OSAC oversight may not apply.</div>`:''}
+      ${roleId==='official'?`<div style="background:rgba(42,127,232,.06);border:1px solid rgba(42,127,232,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:0 0 4px">⚖ <strong style="color:var(--blue)">Oklahoma regulation:</strong> Officials for Boxing, MMA, and Kickboxing events must be OSAC-licensed. Amateur boxing officials also need USA Boxing registration + SafeSport certification.</div>`:''}
+      ${roleId==='gym'?`<div style="background:rgba(42,127,232,.06);border:1px solid rgba(42,127,232,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:0 0 4px">⚖ <strong style="color:var(--blue)">Oklahoma regulation:</strong> Hosting Boxing, MMA, or Kickboxing events requires an OSAC Promoter License + $5,000 surety bond. Amateur boxing events also require USA Boxing club registration and LBC #27 sanctioning.</div>`:`
+      `}
       ${fieldHtml}
       <div id="rfMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
       <button id="rfSaveBtn" onclick="saveRole('${roleId}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">Save</button>
@@ -1047,6 +1182,62 @@ async function saveRole(roleId){
   }
 }
 
+// Called when the sport dropdown changes inside any role form.
+// Updates weight class options, stance visibility, coach specialties,
+// and official types so they always match the selected sport.
+function ruSportChanged(roleId){
+  const sport=document.getElementById('rf_sport')?.value||'';
+  // Show sport description note
+  const descEl=document.getElementById('rf_sport_desc');
+  if(descEl){
+    const si=SPORT_INFO[sport];
+    descEl.innerHTML=si?`<div style="font-size:10px;color:var(--mid);line-height:1.5;margin-top:4px;padding:6px 8px;background:rgba(255,255,255,.03);border-radius:6px">${si.emoji} <strong style="color:var(--lighter)">${si.tagline}</strong> — ${si.desc}<br><span style="color:rgba(42,127,232,.8)">${si.body}</span></div>`:'';
+  }
+  // Fighter: if BKF selected, force level to Professional
+  const lvl=document.getElementById('rf_level');
+  const lvlWrap=document.getElementById('rf_level_wrap');
+  if(lvl&&PRO_ONLY_SPORTS.has(sport)){
+    lvl.value='Professional';
+    if(lvlWrap){lvlWrap.style.opacity='.5';lvlWrap.title='Bare Knuckle Fighting is professional only';}
+  } else if(lvl&&lvlWrap){
+    lvlWrap.style.opacity='';lvlWrap.title='';
+  }
+  // Fighter: weight class options
+  const wcWrap=document.getElementById('rf_weightClass_wrap');
+  if(wcWrap){
+    if(SPORTS_WITH_WEIGHT_CLASSES.has(sport)){
+      wcWrap.style.display='';
+      const wc=document.getElementById('rf_weightClass');
+      if(wc){
+        const cur=wc.value;
+        const opts=WEIGHT_CLASSES_BY_SPORT[sport]||[];
+        wc.innerHTML='<option value="">— Select —</option>'+opts.map(o=>`<option value="${o}" ${cur===o?'selected':''}>${o}</option>`).join('');
+      }
+    } else {
+      wcWrap.style.display='none';
+    }
+  }
+  // Fighter: stance visibility
+  const stanceWrap=document.getElementById('rf_stance_wrap');
+  if(stanceWrap) stanceWrap.style.display=STANCE_SPORTS.has(sport)?'':'none';
+  // Coach: specialty options
+  const spec=document.getElementById('rf_specialty');
+  if(spec){
+    const cur=spec.value;
+    const opts=COACH_SPECIALTIES[sport]||COACH_SPECIALTIES._default;
+    spec.innerHTML='<option value="">— Select —</option>'+opts.map(o=>`<option value="${o}" ${cur===o?'selected':''}>${o}</option>`).join('');
+  }
+  // Official: type options
+  if(roleId==='official'){
+    const ot=document.getElementById('rf_type');
+    if(ot){
+      const cur=ot.value;
+      const opts=OFFICIAL_TYPES[sport]||OFFICIAL_TYPES._default;
+      ot.innerHTML='<option value="">— Select —</option>'+opts.map(o=>`<option value="${o}" ${cur===o?'selected':''}>${o}</option>`).join('');
+    }
+  }
+}
+
 async function clearRole(){
   if(!confirm('Remove your self-listed role?'))return;
   const db=window.ruDB; if(!db)return;
@@ -1057,6 +1248,22 @@ async function clearRole(){
     window.ruRole=null; window.ruRoleInfo={};
     render();
   }catch(e){alert('Could not remove: '+(e&&e.message||e));}
+}
+
+// Lightweight verification queue — stores only a boolean flag, zero sensitive data.
+// Real credential collection begins only after LLC + attorney review are in place.
+async function requestVerification(){
+  const db=window.ruDB; if(!db){alert('Not connected.');return;}
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  try{
+    const upd=await db.from('profiles').update({verification_requested:true}).eq('id',user.id);
+    if(upd.error)throw new Error(upd.error.message||'Could not save');
+    window.ruVerifRequested=true;
+    render();
+  }catch(e){
+    alert('Could not save: '+(e&&e.message||e));
+  }
 }
 
 // ===== Gyms as their own entity (Stage B) =====
@@ -1079,7 +1286,7 @@ async function openGymForm(gymId){
   if(gymId){const g=(state.myGyms||[]).find(x=>x.id===gymId);if(g)gym=g;}
   let m=document.getElementById('ruGymForm');
   if(!m){m=document.createElement('div');m.id='ruGymForm';m.className='modal-bg';m.onclick=function(e){if(e.target===m)m.style.display='none';};document.body.appendChild(m);}
-  const sportOpts=['Boxing','MMA','Kickboxing','Muay Thai'];
+  const sportOpts=COMBAT_SPORTS;
   const inp='width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:\'DM Sans\',sans-serif;margin-top:5px;box-sizing:border-box';
   const lbl='font-size:12px;color:var(--mid);display:block;margin-top:10px';
   m.innerHTML=`
@@ -2207,21 +2414,36 @@ function loadDirectory(){
 function renderDirectory(){
   if(!window._dirLoaded){ window._dirLoaded=true; setTimeout(loadDirectory,0); }
   const filter=state.findFilter||'all';
+  const sportFilter=state.findSport||'all';
   const all=state.directory||[];
   const filterMap={all:null,fighters:'fighter',gyms:'gym',coaches:'coach',officials:'official',sponsors:'sponsor'};
   const want=filterMap[filter];
-  const list=want?all.filter(p=>p.role===want):all;
+  let list=want?all.filter(p=>p.role===want):all;
+  // Apply sport filter (skips sponsor/gym roles since they don't have a single sport field)
+  if(sportFilter!=='all'){
+    list=list.filter(p=>{
+      const s=(p.role_info?.sport||p.role_info?.sports||'');
+      return s===sportFilter||s.includes(sportFilter);
+    });
+  }
   // Real gym entities (separate from people).
   const gyms=state.dirGyms||[];
   const showGyms=(filter==='all'||filter==='gyms');
-  const gymsToShow=showGyms?gyms:[];
+  let gymsToShow=showGyms?gyms:[];
+  if(sportFilter!=='all'&&gymsToShow.length){
+    gymsToShow=gymsToShow.filter(g=>(g.sports||'')===sportFilter||(g.sports||'').includes(sportFilter));
+  }
 
   const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors']]
     .map(([f,lbl])=>`<div class="disco-chip ${filter===f?'active':''}" onclick="setFindFilter('${f}')">${lbl}</div>`).join('');
 
+  const sportChips=[['all','All Sports'],['Boxing','Boxing'],['Kickboxing','Kickboxing'],['Muay Thai','Muay Thai'],['MMA','MMA'],['BJJ / Jiu-Jitsu','BJJ'],['Bare Knuckle Fighting','BKF']]
+    .map(([s,lbl])=>`<div class="disco-chip ${sportFilter===s?'active':''}" onclick="setFindSport('${s}')" style="font-size:10px">${lbl}</div>`).join('');
+
   const head=`
     <div style="background:rgba(245,166,35,.05);border-bottom:1px solid rgba(245,166,35,.12);padding:8px 18px;font-size:10px;color:var(--gold);line-height:1.4">⏳ Self-listed members · not yet verified by RoundUp</div>
-    <div class="disco-tabs" style="margin-top:10px">${chips}</div>`;
+    <div class="disco-tabs" style="margin-top:10px">${chips}</div>
+    <div class="disco-tabs" style="margin-top:4px;padding-bottom:6px">${sportChips}</div>`;
 
   if(state.dirLoading && all.length===0 && gyms.length===0){
     return head+`<div class="empty" style="padding:40px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading members…</div></div>`;
@@ -2239,7 +2461,7 @@ function renderDirectory(){
     const name=p.display_name||p.username||'Creator';
     const info=p.role_info||{};
     let sub='';
-    if(p.role==='fighter')sub=[info.sport,info.weight?info.weight+' lbs':'',info.gym&&info.gym!=='Independent / not listed yet'?info.gym:''].filter(Boolean).join(' · ');
+    if(p.role==='fighter')sub=[info.level,info.sport,info.weightClass||( info.weight?info.weight+' lbs':''),info.gym&&info.gym!=='Independent / not listed yet'?info.gym:''].filter(Boolean).join(' · ');
     else if(p.role==='gym')sub=[info.location,info.sports].filter(Boolean).join(' · ');
     else if(p.role==='coach')sub=[info.specialty,info.sport].filter(Boolean).join(' · ');
     else if(p.role==='official')sub=[info.type,info.sport].filter(Boolean).join(' · ');
@@ -2436,6 +2658,7 @@ function renderFind(role){
 }
 
 function setFindFilter(f){state.findFilter=f;render();}
+function setFindSport(s){state.findSport=s;render();}
 
 /* ===== INBOX ===== */
 function renderInbox(role){
@@ -3562,7 +3785,25 @@ function renderCreatorProfile(){
         ${window.ruRole?`<button onclick="clearRole()" style="background:transparent;border:1px solid var(--dark5);color:var(--mid);padding:9px;border-radius:var(--r);font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif">Remove my self-listed role</button>`:''}
       </div>
 
-      <!-- ── MY GYMS (gyms are their own pages, owned by you) ── -->
+      <!-- ══ VERIFICATION QUEUE ══ -->
+      <div class="sec-head" style="margin-top:4px"><div class="sec-title">Verification</div></div>
+      <div style="padding:0 18px;margin-bottom:14px">
+        ${(()=>{
+          const req=window.ruVerifRequested;
+          if(req){
+            return `<div style="background:rgba(29,184,122,.06);border:1px solid rgba(29,184,122,.25);border-radius:var(--r);padding:14px">
+              <div style="font-size:13px;font-weight:600;color:var(--green);margin-bottom:4px">✓ Verification requested</div>
+              <div style="font-size:11px;color:var(--lighter);line-height:1.55">You're on the list. When RoundUp launches officially and the legal framework is in place, we'll reach out to collect your credentials and issue your verified badge. No documents needed yet.</div>
+            </div>`;
+          }
+          return `<div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:14px">
+            <div style="font-size:13px;font-weight:600;color:var(--white);margin-bottom:4px">Get verified when we launch</div>
+            <div style="font-size:11px;color:var(--mid);line-height:1.55;margin-bottom:10px">Join the verification queue now. No documents required yet — you're just reserving your spot. When RoundUp's legal framework is finalized, verified members get official badges and early access to fight features.</div>
+            <div style="background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin-bottom:10px">⚖ <strong style="color:var(--gold)">No data is collected yet.</strong> Tapping this button stores only a flag (yes/no). Zero documents, no government ID, no medical info. Full credential collection begins only after RoundUp's LLC, privacy policy, and attorney review are in place.</div>
+            ${window.ruRole?`<button onclick="requestVerification()" style="width:100%;background:var(--green);color:#fff;border:none;padding:11px;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif">Request verification — ${ROLE_LABELS[window.ruRole]||'my role'}</button>`:`<div style="font-size:11px;color:var(--mid)">Set a role above first, then you can request verification.</div>`}
+          </div>`;
+        })()}
+      </div>
       <div class="sec-head" style="margin-top:6px"><div class="sec-title">My Gyms</div></div>
       <div style="padding:0 18px;margin-bottom:4px;font-size:11px;color:var(--mid);line-height:1.5">
         A gym is its own page, separate from your personal profile. Create one and you're its owner — you control its info and (soon) its roster.
@@ -3797,7 +4038,7 @@ function renderProfileDetail(){
   let detailRows='';
   const show=(label,val)=>val?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3)"><span style="font-size:12px;color:var(--mid)">${label}</span><span style="font-size:13px;color:var(--white);font-weight:500">${escapeHtml(String(val))}</span></div>`:'';
   if(p.role==='fighter'){
-    detailRows=show('Combat sport',info.sport)+show('Height',info.height)+show('Weight',info.weight?info.weight+' lbs':'')+show('Gym',info.gym)+show('Record',info.record)+show('Stance',info.stance);
+    detailRows=show('Level',info.level)+show('Combat sport',info.sport)+show('Weight class',info.weightClass)+show('Height',info.height)+show('Weight',info.weight?info.weight+' lbs':'')+show('Gym',info.gym)+show('Record',info.record)+show('Stance',info.stance);
   }else if(p.role==='gym'){
     detailRows=show('Gym name',info.name)+show('Location',info.location)+show('Team',info.team)+show('Sports',info.sports);
   }else if(p.role==='coach'){
@@ -6252,6 +6493,18 @@ function renderCreatorHome(){
         <div class="h-scroll">${cards}</div>`;
     })()}
 
+    <div class="sec-head" style="margin-top:6px"><div class="sec-title">Sports on RoundUp</div></div>
+    <div style="padding:0 18px 4px;font-size:11px;color:var(--mid);line-height:1.5;margin-bottom:8px">Six disciplines. Tap any to filter the Find tab.</div>
+    <div style="padding:0 18px;display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+      ${Object.entries(SPORT_INFO).map(([sport,si])=>`
+        <div onclick="setFindSport('${sport}');setTab('find')" style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:12px 14px;cursor:pointer;display:flex;flex-direction:column;gap:4px">
+          <div style="font-size:20px">${si.emoji}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--white)">${sport}</div>
+          <div style="font-size:10px;color:var(--mid);line-height:1.4">${si.tagline}</div>
+          ${PRO_ONLY_SPORTS.has(sport)?`<div style="font-size:9px;font-weight:600;color:var(--gold);margin-top:2px">PRO ONLY</div>`:''}
+        </div>`).join('')}
+    </div>
+
     <div class="sec-head" style="margin-top:6px"><div class="sec-title">Coming Soon</div></div>
     <div style="padding:0 18px 4px;font-size:11px;color:var(--mid);line-height:1.5;margin-bottom:8px">More is on the way for RoundUp. Here's what we're building next:</div>
     <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px">
@@ -8578,7 +8831,7 @@ function attachHandlers(){
     b.onclick=()=>{state.currentRole=b.dataset.role;state.currentScreen='main';state.drilldown=null;state.currentTab=ROLE_PROFILES[b.dataset.role].tabs[0];saveState();render();};
   });
 }
-function setTab(t){if(typeof stopAllReelVideos==='function')stopAllReelVideos();state.currentTab=t;if(t!=='find')state.findFilter='all';state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();if(t==='inbox'&&typeof loadInbox==='function')loadInbox();if(t==='find'&&typeof loadDirectory==='function')loadDirectory();if(t==='profile'&&typeof loadMyGyms==='function')loadMyGyms();if(typeof loadMyNotifications==='function')loadMyNotifications();}
+function setTab(t){if(typeof stopAllReelVideos==='function')stopAllReelVideos();state.currentTab=t;if(t!=='find'){state.findFilter='all';state.findSport='all';}state.currentScreen='main';state.drilldown=null;saveState();render();if(t==='reels'&&typeof loadReelsFromDB==='function')loadReelsFromDB();if(t==='inbox'&&typeof loadInbox==='function')loadInbox();if(t==='find'&&typeof loadDirectory==='function')loadDirectory();if(t==='profile'&&typeof loadMyGyms==='function')loadMyGyms();if(typeof loadMyNotifications==='function')loadMyNotifications();}
 function openConv(otherId){if(typeof stopAllReelVideos==='function')stopAllReelVideos();state.currentScreen='conversation';state.drilldown=otherId;state.dmThreadOtherId=null;state.dmThreadMsgs=[];render();setTimeout(()=>loadDMThread(otherId),0);}
 function openConversation(pid){openConv(pid);}
 function openUserProfile(id){if(typeof stopAllReelVideos==='function')stopAllReelVideos();state.currentScreen='profile_detail';state.drilldown=id;state.viewProfileId=null;state.viewProfile=null;state.viewProfileReels=[];saveState();render();setTimeout(()=>loadViewProfile(id),0);}
@@ -8787,13 +9040,14 @@ render();
       }catch(e){console.log('profile ensure error:',e&&e.message);}
       // Load the saved profile photo + self-listed role (if any) after refresh.
       // Fully non-fatal: any failure here just means we fall back to metadata.
-      db.from('profiles').select('display_name,avatar_url,role,role_info,is_admin').eq('id',res.data.user.id).limit(1).then(function(pr){
+      db.from('profiles').select('display_name,avatar_url,role,role_info,is_admin,verification_requested').eq('id',res.data.user.id).limit(1).then(function(pr){
         var row=pr&&pr.data&&pr.data[0];
         if(row){
           if(row.avatar_url)window.ruAvatarUrl=row.avatar_url;
           if(row.display_name)window.ruName=row.display_name;
           window.ruRole=row.role||null;
           window.ruRoleInfo=row.role_info||{};
+          window.ruVerifRequested=!!row.verification_requested;
           // Real admin gate: if this account is marked is_admin in Supabase,
           // unlock moderation tools (delete any reel/comment, etc.).
           window.ruIsAdmin = !!row.is_admin;
