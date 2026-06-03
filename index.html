@@ -78,63 +78,63 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 /* Background layer — visual only, sits behind the card */
 .ru-auth-bg{
   position:absolute;inset:0;
-  background:linear-gradient(160deg,#1a0000 0%,#0d0d0d 50%,#000 100%);
+  background:linear-gradient(160deg,#200000 0%,#0f0f0f 50%,#000 100%);
   padding:28px 20px;
-  display:flex;flex-direction:column;gap:16px;
+  display:flex;flex-direction:column;gap:14px;
   overflow:hidden;
   pointer-events:none;
   user-select:none;
 }
 .ru-auth-bg-glow{
   position:absolute;top:-60px;left:50%;transform:translateX(-50%);
-  width:300px;height:300px;
-  background:radial-gradient(circle,rgba(232,37,26,.22) 0%,transparent 70%);
+  width:340px;height:340px;
+  background:radial-gradient(circle,rgba(232,37,26,.45) 0%,transparent 65%);
   pointer-events:none;
 }
 .ru-auth-bg-wordmark{
   font-family:'Bebas Neue',sans-serif;font-size:64px;letter-spacing:8px;
-  color:rgba(232,37,26,.18);line-height:1;
+  color:rgba(232,37,26,.75);line-height:1;
 }
 .ru-auth-bg-tagline{
   font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;
-  color:rgba(255,255,255,.12);line-height:1.2;
+  color:rgba(255,255,255,.65);line-height:1.2;margin-top:-4px;
 }
-.ru-auth-bg-tagline span{color:rgba(232,37,26,.25);}
+.ru-auth-bg-tagline span{color:rgba(255,80,60,1);}
+.ru-auth-bg-sub{
+  font-size:13px;font-weight:600;letter-spacing:.5px;
+  color:rgba(255,255,255,.6);margin-top:-6px;
+}
 
-/* Sport pills in background */
-.ru-auth-sports{
-  display:flex;gap:8px;flex-wrap:wrap;
-}
+/* Sport pills */
+.ru-auth-sports{display:flex;gap:7px;flex-wrap:wrap;}
 .ru-auth-sport-pill{
   display:flex;align-items:center;gap:5px;
-  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
+  background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);
   border-radius:20px;padding:5px 11px;font-size:11px;font-weight:600;
-  color:rgba(255,255,255,.25);white-space:nowrap;
+  color:rgba(255,255,255,.75);white-space:nowrap;
 }
 .ru-auth-sport-pill.active{
-  background:rgba(232,37,26,.1);border-color:rgba(232,37,26,.2);
-  color:rgba(232,37,26,.5);
+  background:rgba(232,37,26,.3);border-color:rgba(232,37,26,.7);
+  color:#ff6b5b;
 }
 
-/* Preview cards in background */
-.ru-auth-previews{
-  display:flex;gap:10px;
-}
+/* Preview cards */
+.ru-auth-previews{display:flex;gap:9px;}
 .ru-auth-preview-card{
   flex:1;min-width:0;
-  background:rgba(22,22,22,.6);border:1px solid rgba(255,255,255,.06);
-  border-radius:12px;overflow:hidden;opacity:.7;
+  background:rgba(28,28,28,.92);border:1px solid rgba(255,255,255,.18);
+  border-radius:12px;overflow:hidden;
 }
 .ru-auth-preview-header{
-  background:rgba(232,37,26,.08);padding:7px 9px;
-  border-bottom:1px solid rgba(255,255,255,.05);
+  background:rgba(232,37,26,.18);padding:7px 9px;
+  border-bottom:1px solid rgba(255,255,255,.1);
 }
-.ru-auth-preview-title{font-size:9px;font-weight:600;color:rgba(255,255,255,.5);letter-spacing:.3px;}
-.ru-auth-preview-sub{font-size:8px;color:rgba(255,255,255,.25);margin-top:1px;}
+.ru-auth-preview-title{font-size:9px;font-weight:600;color:rgba(255,255,255,.9);letter-spacing:.3px;}
+.ru-auth-preview-sub{font-size:8px;color:rgba(255,255,255,.5);margin-top:1px;}
 .ru-auth-preview-body{padding:7px 9px;}
 .ru-auth-preview-row{
   display:flex;align-items:center;gap:5px;
-  padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04);
+  padding:4px 0;border-bottom:1px solid rgba(255,255,255,.07);
 }
 .ru-auth-preview-row:last-child{border-bottom:none;}
 .ru-auth-preview-av{
@@ -143,27 +143,25 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
   font-family:'Bebas Neue',sans-serif;font-size:7px;
 }
 .ru-auth-preview-info{flex:1;min-width:0;}
-.ru-auth-preview-name{font-size:9px;font-weight:600;color:rgba(255,255,255,.4);line-height:1.2;}
-.ru-auth-preview-detail{font-size:8px;color:rgba(255,255,255,.2);line-height:1.2;}
+.ru-auth-preview-name{font-size:9px;font-weight:600;color:rgba(255,255,255,.85);line-height:1.2;}
+.ru-auth-preview-detail{font-size:8px;color:rgba(255,255,255,.5);line-height:1.2;}
 .ru-auth-preview-tag{font-size:7px;font-weight:600;padding:1px 4px;border-radius:3px;white-space:nowrap;}
 
-/* Feature bullets in background */
+/* Feature bullets grid */
 .ru-auth-features{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
 .ru-auth-feature{
   display:flex;align-items:flex-start;gap:6px;
-  background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);
   border-radius:9px;padding:8px 9px;
 }
-.ru-auth-feature-icon{font-size:13px;flex-shrink:0;opacity:.5;}
-.ru-auth-feature-text{font-size:9px;color:rgba(255,255,255,.25);line-height:1.4;}
-.ru-auth-feature-text strong{display:block;color:rgba(255,255,255,.35);font-size:9px;margin-bottom:1px;}
+.ru-auth-feature-icon{font-size:13px;flex-shrink:0;}
+.ru-auth-feature-text{font-size:9px;color:rgba(255,255,255,.65);line-height:1.4;}
+.ru-auth-feature-text strong{display:block;color:rgba(255,255,255,.9);font-size:9px;margin-bottom:1px;}
 
-/* Dark overlay between background and card */
+/* Very light overlay — just enough to make card text readable, not hide the background */
 .ru-auth-overlay{
   position:absolute;inset:0;
-  background:rgba(0,0,0,.55);
-  backdrop-filter:blur(3px);
-  -webkit-backdrop-filter:blur(3px);
+  background:rgba(0,0,0,.18);
 }
 
 /* The actual login card — floats centered on top */
@@ -171,19 +169,23 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
   position:relative;z-index:10;
   width:calc(100% - 48px);max-width:360px;
   max-height:92vh;overflow-y:auto;
-  background:rgba(18,18,18,.96);
-  backdrop-filter:blur(24px);
-  -webkit-backdrop-filter:blur(24px);
-  border:1px solid rgba(255,255,255,.13);
+  background:rgba(14,14,14,.97);
+  border:1px solid rgba(255,255,255,.16);
   border-radius:20px;
-  padding:30px 24px 28px;
-  box-shadow:0 32px 80px rgba(0,0,0,.85),0 0 0 1px rgba(232,37,26,.08);
+  padding:26px 24px 24px;
+  box-shadow:0 32px 80px rgba(0,0,0,.9),0 0 0 1px rgba(232,37,26,.12);
 }
 .ru-auth-wordmark{font-family:'Bebas Neue',sans-serif;font-size:40px;letter-spacing:4px;color:var(--red);text-align:center;line-height:1;}
-.ru-auth-tag{text-align:center;color:var(--light);font-size:11px;letter-spacing:1px;margin:4px 0 22px;text-transform:uppercase;}
-.ru-auth-input{width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;
+.ru-auth-tag{text-align:center;color:rgba(255,255,255,.5);font-size:11px;letter-spacing:.5px;margin:3px 0 0;font-style:italic;}
+.ru-auth-divider{height:1px;background:rgba(255,255,255,.08);margin:14px 0;}
+.ru-auth-features-card{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;}
+.ru-auth-feature-row{display:flex;align-items:center;gap:9px;padding:2px 0;}
+.ru-auth-feature-row-icon{font-size:13px;width:20px;text-align:center;flex-shrink:0;}
+.ru-auth-feature-row-text{font-size:12px;color:rgba(255,255,255,.65);line-height:1.3;}
+.ru-auth-feature-row-text strong{color:rgba(255,255,255,.9);font-weight:600;}
+.ru-auth-input{width:100%;box-sizing:border-box;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:10px;
   color:var(--white);font-family:'DM Sans',sans-serif;font-size:15px;padding:13px 14px;margin-bottom:10px;outline:none;}
-.ru-auth-input:focus{border-color:var(--red);background:rgba(255,255,255,.07);}
+.ru-auth-input:focus{border-color:var(--red);background:rgba(255,255,255,.08);}
 .ru-auth-btn{width:100%;background:var(--red);color:#fff;border:none;border-radius:10px;font-family:'DM Sans',sans-serif;
   font-size:15px;font-weight:600;padding:14px;cursor:pointer;margin-top:4px;}
 .ru-auth-btn:active{background:var(--red-dim);}
@@ -730,7 +732,31 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
   <!-- ── Floating login card — centered on top of everything ── -->
   <div class="ru-auth-card">
     <div class="ru-auth-wordmark">ROUNDUP</div>
-    <div class="ru-auth-tag">Combat Sports — Preview</div>
+    <div class="ru-auth-tag">For fighters and community</div>
+
+    <div class="ru-auth-divider"></div>
+
+    <!-- Why RoundUp — feature list -->
+    <div class="ru-auth-features-card">
+      <div class="ru-auth-feature-row">
+        <div class="ru-auth-feature-row-icon">🔎</div>
+        <div class="ru-auth-feature-row-text"><strong>Find fighters, gyms & coaches</strong> across 6 combat sports in one place</div>
+      </div>
+      <div class="ru-auth-feature-row">
+        <div class="ru-auth-feature-row-icon">🎬</div>
+        <div class="ru-auth-feature-row-text"><strong>Post & watch reels</strong> — training clips, sparring, highlight footage</div>
+      </div>
+      <div class="ru-auth-feature-row">
+        <div class="ru-auth-feature-row-icon">💬</div>
+        <div class="ru-auth-feature-row-text"><strong>Message anyone</strong> — fighters, coaches, gym owners directly</div>
+      </div>
+      <div class="ru-auth-feature-row">
+        <div class="ru-auth-feature-row-icon">✅</div>
+        <div class="ru-auth-feature-row-text"><strong>Get verified</strong> — join the queue now, official badges at launch</div>
+      </div>
+    </div>
+
+    <div class="ru-auth-divider"></div>
 
     <div id="ruAuthError" class="ru-auth-error" style="display:none"></div>
 
