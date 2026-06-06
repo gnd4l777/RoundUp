@@ -1083,6 +1083,7 @@ function avatarHtml(prof, name, size){
 function openEditProfile(){
   closeProfileMenu();
   const name=window.ruName||'';
+  const bio=window.ruBio||'';
   let m=document.getElementById('ruEditProfile');
   if(!m){m=document.createElement('div');m.id='ruEditProfile';m.className='modal-bg';m.onclick=function(e){if(e.target===m)m.style.display='none';};document.body.appendChild(m);}
   const cur=window.ruAvatarUrl;
@@ -1099,6 +1100,8 @@ function openEditProfile(){
       </div>
       <label style="font-size:12px;color:var(--mid)">Display name</label>
       <input id="epName" type="text" value="${(name||'').replace(/"/g,'&quot;')}" placeholder="Your name" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:12px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:6px;box-sizing:border-box">
+      <label style="font-size:12px;color:var(--mid);display:block;margin-top:12px">Bio <span style="color:var(--mid);font-weight:400">(optional · visible on your public profile)</span></label>
+      <textarea id="epBio" rows="3" placeholder="Tell the community about yourself — your sport, experience, gym, goals..." style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:12px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:6px;box-sizing:border-box;resize:vertical">${escapeHtml(bio)}</textarea>
       <div id="epMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
       <button id="epSaveBtn" onclick="saveProfile()" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">Save</button>
       <button onclick="document.getElementById('ruEditProfile').style.display='none'" style="width:100%;background:transparent;color:var(--mid);border:none;padding:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:4px">Cancel</button>
@@ -1115,6 +1118,7 @@ async function saveProfile(){
   const msg=document.getElementById('epMsg');
   const btn=document.getElementById('epSaveBtn');
   const newName=(nameInput&&nameInput.value.trim())||'';
+  const newBio=(document.getElementById('epBio')?.value||'').trim();
   if(!newName){msg.textContent='Please enter a display name.';return;}
   btn.disabled=true;btn.textContent='Saving…';msg.textContent='';
   let avatarUrl=window.ruAvatarUrl||null;
@@ -1130,11 +1134,11 @@ async function saveProfile(){
       avatarUrl=pub.data.publicUrl+'?v='+Date.now();
     }
     // Update the profiles row (this is what the feed/comments read).
-    const upd=await db.from('profiles').update({display_name:newName,avatar_url:avatarUrl}).eq('id',user.id);
+    const upd=await db.from('profiles').update({display_name:newName,avatar_url:avatarUrl,bio:newBio}).eq('id',user.id);
     if(upd.error)throw upd.error;
     // Keep auth metadata in sync too.
     await db.auth.updateUser({data:{display_name:newName}});
-    window.ruName=newName; window.ruAvatarUrl=avatarUrl;
+    window.ruName=newName; window.ruAvatarUrl=avatarUrl; window.ruBio=newBio;
     try{ if(state&&state.users&&state.users.me){state.users.me.name=newName;saveState();} }catch(e){}
     const em=document.getElementById('ruEditProfile'); if(em)em.style.display='none';
     if(typeof loadReelsFromDB==='function')loadReelsFromDB();
@@ -1456,6 +1460,95 @@ function ruSportChanged(roleId){
       ot.innerHTML='<option value="">— Select —</option>'+opts.map(o=>`<option value="${o}" ${cur===o?'selected':''}>${o}</option>`).join('');
     }
   }
+}
+
+function openHelpPage(){
+  state.currentScreen='help';
+  state.drilldown=null;
+  render();
+}
+
+function renderHelpPage(){
+  return `
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Help & About</div><div style="width:34px"></div></div>
+    <div class="inner-scroll">
+      <div style="padding:20px 18px 0;background:linear-gradient(180deg,rgba(232,37,26,.06),transparent)">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;color:var(--white);margin-bottom:6px">What is RoundUp?</div>
+        <div style="font-size:13px;color:var(--lighter);line-height:1.7;margin-bottom:14px">RoundUp is Tulsa's combat sports community platform — built for fighters, coaches, gym owners, officials, and fans across Boxing, Kickboxing, Muay Thai, MMA, BJJ, and Bare Knuckle Fighting. Post reels, find community members, message anyone directly, and get verified for when live events launch.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
+          ${COMBAT_SPORTS.map(s=>`<span style="background:var(--dark2);border:1px solid var(--dark4);border-radius:20px;padding:5px 12px;font-size:11px;color:var(--lighter)">${SPORT_INFO[s]?.emoji||''} ${s}</span>`).join('')}
+        </div>
+      </div>
+
+      <div class="sec-head"><div class="sec-title">Account Types</div></div>
+      <div style="padding:0 18px;display:flex;flex-direction:column;gap:10px;margin-bottom:14px">
+        <div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:14px 16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:20px">🎬</span><div><div style="font-size:14px;font-weight:700;color:var(--white)">Creator</div><div style="font-size:10px;color:var(--mid);text-transform:uppercase;letter-spacing:.5px">Everyone starts here</div></div></div>
+          <div style="font-size:12px;color:var(--lighter);line-height:1.65">Your base account. Post reels, watch the feed, send direct messages, follow fighters and gyms, and join the community. You can add a sport role on top of this (Fighter, Coach, etc.) at any time from your profile. Think of Creator as your RoundUp identity — everything else builds on it.</div>
+        </div>
+        <div style="background:var(--dark2);border-left:3px solid var(--red);border-radius:var(--r);padding:14px 16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:20px">🥊</span><div><div style="font-size:14px;font-weight:700;color:var(--white)">Fighter</div><div style="font-size:10px;color:var(--red);text-transform:uppercase;letter-spacing:.5px">Amateur or Professional</div></div></div>
+          <div style="font-size:12px;color:var(--lighter);line-height:1.65">List your sport, weight class, gym, and record so people can find you. Fighters are the heart of the platform. When events launch you'll have a verified profile, a personal ticket link that earns you commission on every sale, and access to fight features. <strong style="color:var(--gold)">Self-listed during early access</strong> — real USA Boxing or OSAC credentials collected when the legal framework is finalized.</div>
+        </div>
+        <div style="background:var(--dark2);border-left:3px solid var(--purple);border-radius:var(--r);padding:14px 16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:20px">🩺</span><div><div style="font-size:14px;font-weight:700;color:var(--white)">Coach / Corner</div><div style="font-size:10px;color:var(--purple);text-transform:uppercase;letter-spacing:.5px">Head coaches, cutmen, S&C</div></div></div>
+          <div style="font-size:12px;color:var(--lighter);line-height:1.65">List your specialty and sport so fighters can find you. Coaches appear in the directory and can be searched by fighters and gyms looking for corner support. When events launch, coaches can be officially booked for fight cards.</div>
+        </div>
+        <div style="background:var(--dark2);border-left:3px solid var(--gold);border-radius:var(--r);padding:14px 16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:20px">🏋</span><div><div style="font-size:14px;font-weight:700;color:var(--white)">Gym</div><div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.5px">Gym owners & managers</div></div></div>
+          <div style="font-size:12px;color:var(--lighter);line-height:1.65">Create a Gym page (separate from your personal profile) to represent your facility. Add your address, sports, bio, and team. Fighters can request to join your roster. When events launch, gyms can host fight cards and list venue slots for rent. You own and control your gym's page.</div>
+        </div>
+        <div style="background:var(--dark2);border-left:3px solid var(--green);border-radius:var(--r);padding:14px 16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:20px">⚖</span><div><div style="font-size:14px;font-weight:700;color:var(--white)">Official</div><div style="font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:.5px">Referees, judges, physicians</div></div></div>
+          <div style="font-size:12px;color:var(--lighter);line-height:1.65">List your official type and sport so gyms can find and book you. Officials must hold a current USA Boxing registration + SafeSport certificate (for amateur boxing) or OSAC license (for pro/MMA/kickboxing events). When events launch, gyms browse the Officials Marketplace and send booking requests directly.</div>
+        </div>
+        <div style="background:var(--dark2);border-left:3px solid var(--blue);border-radius:var(--r);padding:14px 16px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:20px">💼</span><div><div style="font-size:14px;font-weight:700;color:var(--white)">Sponsor</div><div style="font-size:10px;color:var(--blue);text-transform:uppercase;letter-spacing:.5px">Brands & businesses</div></div></div>
+          <div style="font-size:12px;color:var(--lighter);line-height:1.65">List your brand and what you want to sponsor. RoundUp connects sponsors with fighters, gyms, and events through a transparent brand ambassador model. Build custom packages, back individual fighters, or claim event tiers — all with clear fee disclosure before any transaction.</div>
+        </div>
+      </div>
+
+      <div class="sec-head"><div class="sec-title">What's Live Now</div></div>
+      <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+        ${[
+          ['🎬','Reels feed','Post photos and videos. Watch and like content from the community. Share reels into direct messages.'],
+          ['🔎','Find directory','Browse fighters, coaches, gyms, officials, sponsors, and creators. Filter by role and sport. Tap anyone to view their profile.'],
+          ['💬','Direct messages','Message anyone on RoundUp one-on-one. Start new conversations from the inbox or from any profile page.'],
+          ['🏋','Gym pages','Create a gym page, add your info and bio, and let fighters request to join your roster.'],
+          ['👤','Self-listed roles','Add your sport role so the community knows who you are. Self-reported for now — verification launches with events.'],
+          ['✅','Verification queue','Join the verification list now. No documents yet — just a reservation. Official badges go to verified members first.'],
+        ].map(([ic,t,d])=>`
+          <div style="display:flex;gap:12px;align-items:flex-start;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:12px 14px">
+            <span style="font-size:18px;flex-shrink:0">${ic}</span>
+            <div><div style="font-size:13px;font-weight:600;color:var(--white);margin-bottom:2px">${t}</div><div style="font-size:11px;color:var(--mid);line-height:1.5">${d}</div></div>
+          </div>`).join('')}
+      </div>
+
+      <div class="sec-head"><div class="sec-title">Coming Soon</div></div>
+      <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+        ${[
+          ['🎟','Live event ticketing','Buy and sell tickets to sanctioned fight cards right in the app — reserved and ringside seating.'],
+          ['📋','Sanctioned fight cards','Gyms build cards, match fighters, assign officials. Sanctioned under USA Boxing LBC #27 and OSAC.'],
+          ['🛡','Verified badges','Once the legal framework is finalized, credentials are collected and verified badges appear on profiles.'],
+          ['💳','Subscriptions','Monthly tiers for fans to follow fighters and gyms — with exclusive content, early ticket access, and event perks.'],
+          ['📊','Revenue dashboard','Each fighter sees their own earnings from ticket commissions, brand deals, and content subscriptions.'],
+        ].map(([ic,t,d])=>`
+          <div style="display:flex;gap:12px;align-items:flex-start;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:12px 14px;opacity:.8">
+            <span style="font-size:18px;flex-shrink:0">${ic}</span>
+            <div>
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><div style="font-size:13px;font-weight:600;color:var(--white)">${t}</div><span style="font-size:9px;background:var(--dark4);color:var(--mid);padding:2px 7px;border-radius:8px;font-weight:600;text-transform:uppercase">Soon</span></div>
+              <div style="font-size:11px;color:var(--mid);line-height:1.5">${d}</div>
+            </div>
+          </div>`).join('')}
+      </div>
+
+      <div style="margin:0 18px 18px;background:rgba(42,127,232,.06);border:1px solid rgba(42,127,232,.2);border-radius:var(--r);padding:14px 16px">
+        <div style="font-size:12px;font-weight:600;color:var(--blue);margin-bottom:8px">⚖ Oklahoma Compliance</div>
+        <div style="font-size:11px;color:var(--lighter);line-height:1.7">Boxing, MMA, and Kickboxing events in Oklahoma are regulated by OSAC. Amateur boxing is also governed by USA Boxing through LBC #27. BJJ, Grappling, and other disciplines are privately governed. RoundUp is building its event features to be fully compliant before any live events are hosted. No bouts will run through the app until all legal and regulatory requirements are met.</div>
+      </div>
+
+      <div class="pb-safe"></div>
+    </div>`;
 }
 
 async function clearRole(){
@@ -2195,6 +2288,9 @@ function render(){
   const wrap=document.getElementById('screenWrap');
   if(state.currentScreen==='conversation'){
     wrap.innerHTML=renderConversation();
+  }else if(state.currentScreen==='help'){
+    wrap.innerHTML=renderHelpPage();
+    attachHandlers();return;
   }else if(state.currentScreen==='admin_verify'){
     wrap.innerHTML=renderAdminVerifyDashboard();
     attachHandlers();return;
@@ -2615,11 +2711,12 @@ function renderOfficialHome(){
 function loadDirectory(){
   const db=window.ruDB; if(!db)return;
   state.dirLoading=true;
-  // People with a self-listed role (excluding the old 'gym' role — gyms are
-  // now their own entity, loaded separately below).
-  db.from('profiles').select('id,display_name,username,avatar_url,role,role_info').not('role','is',null).limit(500)
+  // Fetch ALL profiles — roled members AND pure creators (no role).
+  db.from('profiles').select('id,display_name,username,avatar_url,role,role_info').limit(500)
     .then(function(res){
-      state.directory=(res.data||[]).filter(p=>p.role!=='gym');
+      const all=(res.data||[]).filter(p=>p.role!=='gym');
+      state.directory=all.filter(p=>p.role); // has a self-listed role
+      state.dirCreators=all.filter(p=>!p.role); // creator-only accounts
       state.dirLoading=false;
       if(state.currentTab==='find')render();
     }).catch(function(e){state.dirLoading=false;console.log('loadDirectory error:',e&&e.message);});
@@ -2636,10 +2733,11 @@ function renderDirectory(){
   const filter=state.findFilter||'all';
   const sportFilter=state.findSport||'all';
   const all=state.directory||[];
+  const creators=state.dirCreators||[];
   const filterMap={all:null,fighters:'fighter',gyms:'gym',coaches:'coach',officials:'official',sponsors:'sponsor'};
   const want=filterMap[filter];
   let list=want?all.filter(p=>p.role===want):all;
-  // Apply sport filter (skips sponsor/gym roles since they don't have a single sport field)
+  // Apply sport filter
   if(sportFilter!=='all'){
     list=list.filter(p=>{
       const s=(p.role_info?.sport||p.role_info?.sports||'');
@@ -2653,8 +2751,11 @@ function renderDirectory(){
   if(sportFilter!=='all'&&gymsToShow.length){
     gymsToShow=gymsToShow.filter(g=>(g.sports||'')===sportFilter||(g.sports||'').includes(sportFilter));
   }
+  // Creators shown on 'all' or 'creators' filter, no sport filter applied
+  const showCreators=(filter==='all'||filter==='creators');
+  const creatorsToShow=showCreators?creators:[];
 
-  const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors']]
+  const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors'],['creators','Creators 🎬']]
     .map(([f,lbl])=>`<div class="disco-chip ${filter===f?'active':''}" onclick="setFindFilter('${f}')">${lbl}</div>`).join('');
 
   const sportChips=[['all','All Sports'],['Boxing','Boxing'],['Kickboxing','Kickboxing'],['Muay Thai','Muay Thai'],['MMA','MMA'],['BJJ / Jiu-Jitsu','BJJ'],['Bare Knuckle Fighting','BKF']]
@@ -2663,17 +2764,20 @@ function renderDirectory(){
   const head=`
     <div style="background:rgba(245,166,35,.05);border-bottom:1px solid rgba(245,166,35,.12);padding:8px 18px;font-size:10px;color:var(--gold);line-height:1.4">⏳ Self-listed members · not yet verified by RoundUp</div>
     <div class="disco-tabs" style="margin-top:10px">${chips}</div>
-    <div class="disco-tabs" style="margin-top:4px;padding-bottom:6px">${sportChips}</div>`;
+    ${filter!=='creators'?`<div class="disco-tabs" style="margin-top:4px;padding-bottom:6px">${sportChips}</div>`:''}`;
 
-  if(state.dirLoading && all.length===0 && gyms.length===0){
+  if(state.dirLoading && all.length===0 && gyms.length===0 && creators.length===0){
     return head+`<div class="empty" style="padding:40px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading members…</div></div>`;
   }
-  // When the Gyms filter is on, the gyms list carries the content.
   if(filter==='gyms'){
     if(gymsToShow.length===0){
       return head+`<div class="empty"><div class="empty-icon">🏋</div><div class="empty-title">No gyms yet</div><div class="empty-text">No gyms have been created yet. Create one from your Profile to be the first.</div><button class="empty-btn" onclick="setTab('profile')">Create a gym</button></div>`;
     }
-  } else if(list.length===0 && gymsToShow.length===0){
+  } else if(filter==='creators'){
+    if(creatorsToShow.length===0){
+      return head+`<div class="empty"><div class="empty-icon">🎬</div><div class="empty-title">No creators yet</div><div class="empty-text">Creators are members posting reels and content who haven't listed a sport role yet. They'll show up here as the community grows.</div></div>`;
+    }
+  } else if(list.length===0 && gymsToShow.length===0 && creatorsToShow.length===0){
     return head+`<div class="empty"><div class="empty-icon">🔎</div><div class="empty-title">Nobody here yet</div><div class="empty-text">No one has listed themselves${want?(' as a '+want):''} yet. Add your own role from your Profile to be the first.</div><button class="empty-btn" onclick="setTab('profile')">Set my role</button></div>`;
   }
 
@@ -2687,12 +2791,13 @@ function renderDirectory(){
     else if(p.role==='official')sub=[info.type,info.sport].filter(Boolean).join(' · ');
     else if(p.role==='sponsor')sub=[info.brand,info.looking].filter(Boolean).join(' · ');
     const roleColor={fighter:'var(--red)',gym:'var(--gold)',coach:'var(--purple)',official:'var(--green)',sponsor:'var(--blue)'}[p.role]||'var(--light)';
+    const roleLabel=p.role?(ROLE_LABELS[p.role]||p.role):'Creator';
     return `
       <div onclick="openDirProfile('${p.id}')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
         ${avatarHtml(p,name,44)}
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${name}</span><span style="font-size:9px;color:${roleColor};font-weight:600;text-transform:uppercase;letter-spacing:.5px">${ROLE_LABELS[p.role]||p.role}</span></div>
-          <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub||'Self-listed'}</div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${name}</span><span style="font-size:9px;color:${roleColor};font-weight:600;text-transform:uppercase;letter-spacing:.5px">${roleLabel}</span></div>
+          <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub||'RoundUp member'}</div>
         </div>
         <span style="color:var(--mid);font-size:16px">›</span>
       </div>`;
@@ -2717,6 +2822,7 @@ function renderDirectory(){
     <div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px">
       ${gymsToShow.map(gymCard).join('')}
       ${filter==='gyms'?'':list.map(card).join('')}
+      ${creatorsToShow.map(card).join('')}
     </div>
     <div class="pb-safe"></div>`;
 }
@@ -3948,7 +4054,11 @@ function renderCreatorProfile(){
       <div style="padding:20px 18px 14px">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;color:var(--white)">My Profile</div>
         <div style="font-size:12px;color:var(--mid);margin-top:2px">${window.ruName||(me?me.name:'Creator')} · RoundUp</div>
-        <button onclick="if(window.ruUserId)openUserProfile(window.ruUserId)" style="margin-top:10px;background:var(--dark3);color:var(--white);border:none;padding:8px 16px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">👁 View my public profile</button>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button onclick="openEditProfile()" style="background:var(--dark3);color:var(--white);border:none;padding:8px 16px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">✏️ Edit profile</button>
+          <button onclick="openUserProfile(window.ruUserId||'me')" style="background:var(--dark3);color:var(--white);border:none;padding:8px 16px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">👁 View public profile</button>
+          <button onclick="openHelpPage()" style="background:var(--dark3);color:var(--lighter);border:none;padding:8px 14px;border-radius:10px;font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif">❓ Help</button>
+        </div>
       </div>
 
       <!-- Stats -->
@@ -4299,6 +4409,17 @@ function renderProfileDetail(){
         <div style="font-size:10px;color:var(--mid);padding:8px 0 4px;line-height:1.4">⏳ Self-listed — not verified by RoundUp. Real credentials required when events launch.</div>
       </div>`:''}
 
+      ${p.bio?`
+      <div class="sec-head"><div class="sec-title">Bio</div>${isMe?`<button class="sec-link" onclick="openEditProfile()">Edit</button>`:''}</div>
+      <div style="margin:0 18px 8px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:14px">
+        <div style="font-size:13px;color:var(--lighter);line-height:1.7;white-space:pre-wrap">${escapeHtml(p.bio)}</div>
+      </div>`
+      :isMe?`
+      <div style="margin:8px 18px;padding:12px 14px;background:var(--dark2);border:1px dashed var(--dark5);border-radius:var(--r);display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:12px;color:var(--mid)">No bio yet — tell the community about yourself</div>
+        <button onclick="openEditProfile()" style="background:var(--dark3);color:var(--lighter);border:none;padding:6px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Add bio</button>
+      </div>`:''}
+
       <!-- Subscription preview — polished, clearly launching-soon, not yet active -->
       ${!isMe?`
       <div class="sec-head" style="display:flex;justify-content:space-between;align-items:center">
@@ -4358,7 +4479,7 @@ async function loadViewProfile(id){
   const db=window.ruDB; if(!db||!id)return;
   state.viewProfileLoading=true;
   try{
-    const pr=await db.from('profiles').select('id,username,display_name,avatar_url,role,role_info').eq('id',id).limit(1);
+    const pr=await db.from('profiles').select('id,username,display_name,avatar_url,role,role_info,bio').eq('id',id).limit(1);
     state.viewProfile=(pr.data&&pr.data[0])||null;
     state.viewProfileId=id;
     // Their reels
@@ -9260,11 +9381,12 @@ render();
       }catch(e){console.log('profile ensure error:',e&&e.message);}
       // Load the saved profile photo + self-listed role (if any) after refresh.
       // Fully non-fatal: any failure here just means we fall back to metadata.
-      db.from('profiles').select('display_name,avatar_url,role,role_info,is_admin,verification_requested').eq('id',res.data.user.id).limit(1).then(function(pr){
+      db.from('profiles').select('display_name,avatar_url,role,role_info,is_admin,verification_requested,bio').eq('id',res.data.user.id).limit(1).then(function(pr){
         var row=pr&&pr.data&&pr.data[0];
         if(row){
           if(row.avatar_url)window.ruAvatarUrl=row.avatar_url;
           if(row.display_name)window.ruName=row.display_name;
+          if(row.bio)window.ruBio=row.bio;
           window.ruRole=row.role||null;
           window.ruRoleInfo=row.role_info||{};
           window.ruVerifRequested=!!row.verification_requested;
@@ -9272,6 +9394,14 @@ render();
           // unlock moderation tools (delete any reel/comment, etc.).
           window.ruIsAdmin = !!row.is_admin;
           if(row.is_admin && typeof window.ruUnlockAdmin==='function'){window.ruUnlockAdmin(false);}
+          // Immediately sync name into local state so profile page stops showing "New Creator"
+          try{
+            if(window.ruName && state && state.users && state.users.me){
+              state.users.me.name=window.ruName;
+              if(window.ruName[0])state.users.me.avatar=window.ruName.trim().slice(0,2).toUpperCase();
+              saveState();
+            }
+          }catch(e){}
           if(typeof render==='function')render();
         }
       }).catch(function(e){console.log('profile load skipped:',e&&e.message);});
