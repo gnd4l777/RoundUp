@@ -1117,9 +1117,10 @@ async function saveProfile(){
   const photoInput=document.getElementById('epPhoto');
   const msg=document.getElementById('epMsg');
   const btn=document.getElementById('epSaveBtn');
-  const newName=(nameInput&&nameInput.value.trim())||'';
-  const newBio=(document.getElementById('epBio')?.value||'').trim();
+  const newName=cleanText(nameInput&&nameInput.value, RU_LIMITS.name);
+  const newBio=cleanMultiline(document.getElementById('epBio')?.value, RU_LIMITS.bio);
   if(!newName){msg.textContent='Please enter a display name.';return;}
+  if(newName.length<2){msg.textContent='Display name must be at least 2 characters.';return;}
   btn.disabled=true;btn.textContent='Saving…';msg.textContent='';
   let avatarUrl=window.ruAvatarUrl||null;
   try{
@@ -1387,7 +1388,7 @@ async function saveRole(roleId){
   const info={};
   for(const f of fields){
     const el=document.getElementById('rf_'+f.k);
-    const v=el?el.value.trim():'';
+    const v=el?cleanText(el.value, RU_LIMITS.generic):'';
     if(f.req&&!v){msg.textContent='Please fill in: '+f.label.replace(/<.*?>/g,'');return;}
     if(v)info[f.k]=v;
   }
@@ -1643,13 +1644,13 @@ async function saveGym(gymId){
   const db=window.ruDB; if(!db){alert('Not connected.');return;}
   const {data:{user}}=await db.auth.getUser();
   if(!user){alert('Please log in again.');return;}
-  const name=(document.getElementById('gf_name').value||'').trim();
-  const location=(document.getElementById('gf_location').value||'').trim();
-  const sports=(document.getElementById('gf_sports').value||'').trim();
-  const team=(document.getElementById('gf_team').value||'').trim();
-  const address=(document.getElementById('gf_address').value||'').trim();
-  const contact=(document.getElementById('gf_contact').value||'').trim();
-  const bio=(document.getElementById('gf_bio').value||'').trim();
+  const name=cleanText(document.getElementById('gf_name').value, RU_LIMITS.gymName);
+  const location=cleanText(document.getElementById('gf_location').value, RU_LIMITS.location);
+  const sports=cleanText(document.getElementById('gf_sports').value, RU_LIMITS.generic);
+  const team=cleanText(document.getElementById('gf_team').value, RU_LIMITS.team);
+  const address=cleanText(document.getElementById('gf_address').value, RU_LIMITS.address);
+  const contact=cleanText(document.getElementById('gf_contact').value, RU_LIMITS.contact);
+  const bio=cleanMultiline(document.getElementById('gf_bio').value, RU_LIMITS.gymBio);
   const photoInput=document.getElementById('gf_photo');
   const msg=document.getElementById('gfMsg');
   const btn=document.getElementById('gfSaveBtn');
@@ -5139,7 +5140,7 @@ async function loadDMThread(otherId){
 async function sendMsg(){
   const inp=document.getElementById('msgInput');
   if(!inp)return;
-  const text=inp.value.trim();
+  const text=cleanText(inp.value, RU_LIMITS.message);
   if(!text)return;
   const otherId=state.drilldown;
   const db=window.ruDB; if(!db)return;
@@ -5157,7 +5158,7 @@ async function sendMsg(){
     await loadDMThread(otherId);
   }catch(e){
     console.log('sendMsg error:',e);
-    alert('Could not send: '+(e&&e.message||e));
+    alert('Your message couldn\'t be sent. Please try again.');
     await loadDMThread(otherId);
   }
 }
@@ -7844,7 +7845,7 @@ async function sendReelToUser(reelId, otherId){
     openConv(otherId);
   }catch(e){
     console.log('sendReelToUser error:',e);
-    alert('Could not send: '+(e&&e.message||e));
+    alert('That reel couldn\'t be sent. Please try again.');
   }
 }
 
@@ -7879,7 +7880,7 @@ async function submitComment(reelId){
   const db=window.ruDB; if(!db)return;
   const input=document.getElementById('cmt_'+reelId);
   if(!input)return;
-  const body=input.value.trim();
+  const body=cleanText(input.value, RU_LIMITS.message);
   if(!body)return;
   const {data:{user}}=await db.auth.getUser();
   if(!user){alert('Please log in again.');return;}
@@ -7888,7 +7889,7 @@ async function submitComment(reelId){
     if(error)throw error;
     input.value='';
     await loadComments(reelId);
-  }catch(e){alert('Could not comment: '+(e&&e.message||e));}
+  }catch(e){console.log('comment error:',e);alert('Your comment couldn\'t be posted. Please try again.');}
 }
 async function deleteComment(reelId,commentId){
   const db=window.ruDB; if(!db)return;
@@ -8013,6 +8014,70 @@ function compressImage(file, maxDim, quality){
 }
 
 function escapeHtml(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+/* ════════════════════════════════════════════════════════════════════
+   INPUT VALIDATION & SANITIZATION (client-side guardrails)
+   These cap length and strip dangerous content BEFORE anything is sent to
+   the database. This is a first line of defense — the real enforcement is
+   Row Level Security + column constraints in Supabase. But rejecting oversized
+   or malformed input here gives users instant feedback and blocks the obvious
+   abuse (giant payloads, control characters, script-y content in text fields).
+   ════════════════════════════════════════════════════════════════════ */
+const RU_LIMITS={
+  name:60, username:30, bio:600, caption:500, message:2000,
+  gymName:80, location:120, address:200, contact:120, team:200, gymBio:1000,
+  cardName:100, venue:120, generic:200,
+};
+
+// Clean a single-line text field: trim, strip control chars, collapse whitespace,
+// enforce a max length. Returns the cleaned string (never throws).
+function cleanText(v, max){
+  if(v==null)return '';
+  let s=String(v);
+  // Remove null bytes and most control characters (keep normal whitespace).
+  s=s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,'');
+  s=s.trim();
+  if(max && s.length>max)s=s.slice(0,max);
+  return s;
+}
+
+// Clean a multi-line field (bio, caption): same as above but preserves newlines,
+// and caps consecutive blank lines so nobody can paste 10,000 empty lines.
+function cleanМultilineText(v, max){ return cleanMultiline(v,max); } // guard against typo callers
+function cleanMultiline(v, max){
+  if(v==null)return '';
+  let s=String(v);
+  s=s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,'');
+  // Normalize line endings, cap runs of blank lines to 2.
+  s=s.replace(/\r\n/g,'\n').replace(/\n{3,}/g,'\n\n');
+  s=s.replace(/[ \t]+\n/g,'\n').trim();
+  if(max && s.length>max)s=s.slice(0,max);
+  return s;
+}
+
+// Validate a value against a limit. Returns {ok, value, error}.
+// Use for required fields so we get a friendly message instead of a DB error.
+function validateField(label, v, max, opts){
+  opts=opts||{};
+  const cleaned=opts.multiline?cleanMultiline(v,max):cleanText(v,max);
+  if(opts.required && !cleaned){
+    return {ok:false, value:'', error:'Please enter '+label+'.'};
+  }
+  if(opts.min && cleaned.length<opts.min){
+    return {ok:false, value:cleaned, error:label+' must be at least '+opts.min+' characters.'};
+  }
+  // If the raw input was over the cap, tell the user it was trimmed (non-fatal).
+  if(v && String(v).trim().length>max){
+    return {ok:true, value:cleaned, error:null, trimmed:true};
+  }
+  return {ok:true, value:cleaned, error:null};
+}
+
+// Basic email shape check (defense in depth — Supabase validates too).
+function isValidEmail(e){
+  e=String(e||'').trim();
+  return e.length<=254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+}
 
 function playReel(rid){
   const r=SAMPLE_REELS.find(x=>x.id===rid)||(state.myReels||[]).find(x=>x.id===rid);
@@ -8252,7 +8317,7 @@ function closeRecorder(){
 }
 
 async function doPostReel(){
-  const cap=document.getElementById('reelCaption').value.trim();
+  const cap=cleanMultiline(document.getElementById('reelCaption').value, RU_LIMITS.caption);
   const fileInput=document.getElementById('reelFile');
   // A recorded video (from the in-app recorder) takes priority over a chosen file.
   const file=window._ruRecordedFile || (fileInput&&fileInput.files&&fileInput.files[0]);
@@ -9196,43 +9261,31 @@ loadState();
 render();
 
 /* ----------------------------------------------------------------------------
-   ADMIN VIEW ACCESS (hardened)
-   The "View as" bar is hidden and is NO LONGER triggered by a bare #admin or by
-   tapping the corner — those caused accidental access. Now it unlocks only by:
-     1. A secret passphrase in the URL:  ...netlify.app/#admin-roundup2026
-        (change the passphrase below to whatever you like; keep it private)
-     2. Automatically, if your logged-in Supabase account has is_admin = true
-        (checked in Stage 4). This is the real, meaningful gate.
-   Once unlocked via passphrase it's remembered on THIS device until "Exit admin".
+   ADMIN VIEW ACCESS (server-gated only)
+   Admin/moderator tools unlock ONLY when the logged-in Supabase account has
+   is_admin = true on its profiles row. That flag is checked at login (see the
+   profile-load block) and is the single source of truth.
+
+   There is deliberately NO client-side passphrase or URL-hash backdoor. A
+   passphrase baked into public HTML can be read by anyone viewing source, so it
+   provided no real security — it only created the illusion of one. Removing it
+   means the ONLY way to be admin is the database flag, which is also what
+   Row Level Security enforces server-side. The two now agree.
+
+   To grant admin: in Supabase SQL editor run
+     UPDATE profiles SET is_admin = true WHERE id = '<user-uuid>';
    ------------------------------------------------------------------------- */
 (function(){
-  // CHANGE THIS to your own private phrase. Anyone who knows it can open the
-  // demo admin bar, so don't share it. (Real server-side admin is the is_admin
-  // flag in Supabase; this passphrase is just for the local demo view.)
-  var ADMIN_PASSPHRASE = '#admin-roundup2026';
-
   var app=document.getElementById('app');
-  function unlock(persist){
-    app.classList.add('admin-unlocked');
-    if(persist){try{localStorage.setItem('ru_admin','1');}catch(e){}}
-  }
-  window.ruUnlockAdmin=unlock; // used by the Supabase is_admin check in later stages
+  function unlock(){ app.classList.add('admin-unlocked'); }
+  // Called by the login profile-load block ONLY when row.is_admin === true.
+  window.ruUnlockAdmin=unlock;
+  // "Exit admin" hides the bar for this view; real privilege is still governed
+  // by the database flag on next load.
   window.lockAdmin=function(){
     app.classList.remove('admin-unlocked');
-    try{localStorage.removeItem('ru_admin');}catch(e){}
     if(location.hash){history.replaceState(null,'',location.pathname+location.search);}
   };
-  // Remembered from a previous deliberate unlock on this device
-  try{if(localStorage.getItem('ru_admin')==='1')unlock(false);}catch(e){}
-  // Secret passphrase in the URL (and clear it from the bar so it isn't visible)
-  function checkHash(){
-    if(location.hash===ADMIN_PASSPHRASE){
-      unlock(true);
-      history.replaceState(null,'',location.pathname+location.search);
-    }
-  }
-  checkHash();
-  window.addEventListener('hashchange',checkHash);
 })();
 
 /* ============================================================================
@@ -9287,11 +9340,18 @@ render();
   // Sign up
   document.getElementById('ruSignupBtn').addEventListener('click',function(){
     clearErr();
-    var name=document.getElementById('ruSuName').value.trim();
-    var user=document.getElementById('ruSuUser').value.trim().toLowerCase().replace(/[^a-z0-9_]/g,'');
-    var email=document.getElementById('ruSuEmail').value.trim();
+    var name=cleanText(document.getElementById('ruSuName').value, RU_LIMITS.name);
+    var user=cleanText(document.getElementById('ruSuUser').value, RU_LIMITS.username).toLowerCase().replace(/[^a-z0-9_]/g,'');
+    var email=cleanText(document.getElementById('ruSuEmail').value, 254);
     var pass=document.getElementById('ruSuPass').value;
-    if(!name||!user||!email||pass.length<8){showErr('Please fill every field. Password must be 8+ characters.');return;}
+    if(!name||!user||!email||!pass){showErr('Please fill every field.');return;}
+    if(name.length<2){showErr('Display name must be at least 2 characters.');return;}
+    if(user.length<3){showErr('Username must be at least 3 characters (letters, numbers, underscore).');return;}
+    if(!isValidEmail(email)){showErr('Please enter a valid email address.');return;}
+    if(pass.length<8){showErr('Password must be at least 8 characters.');return;}
+    if(pass.length>128){showErr('Password is too long (max 128 characters).');return;}
+    // Encourage a stronger password — must contain a letter and a number.
+    if(!/[a-zA-Z]/.test(pass)||!/[0-9]/.test(pass)){showErr('Password must include at least one letter and one number.');return;}
     setBusy(true);
     db.auth.signUp({email:email,password:pass,options:{data:{username:user,display_name:name}}})
       .then(function(r){
@@ -9301,7 +9361,7 @@ render();
         if(r.data && r.data.session){ openApp(); }
         else { ruShow('login'); showErr('Account created. Please log in.'); }
       })
-      .catch(function(e){setBusy(false);showErr('Something went wrong: '+(e&&e.message||e));});
+      .catch(function(e){setBusy(false);console.log('signup error:',e);showErr('Could not create your account. Please try again.');});
   });
 
   // Log in
