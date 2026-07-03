@@ -7724,16 +7724,58 @@ async function submitReel(caption, file){
   }
 }
 
+// Given a Supabase public URL for the 'reels' bucket, return the object path
+// INSIDE the bucket (e.g. "userid/1699999999.mp4"), or null if it can't be
+// parsed. Handles the cache-bust "?v=..." suffix and both the public and
+// render URL shapes. This is how we find the actual file to delete.
+function reelPathFromUrl(url){
+  if(!url)return null;
+  try{
+    // Strip any query string (cache-bust ?v=timestamp).
+    var clean=String(url).split('?')[0];
+    // Everything after ".../reels/" is the object path within the bucket.
+    var marker='/reels/';
+    var i=clean.indexOf(marker);
+    if(i===-1)return null;
+    var path=clean.slice(i+marker.length);
+    return path||null;
+  }catch(e){return null;}
+}
+
 // Delete a reel (own, or any if admin — enforced by the DB policy too).
+// IMPORTANT: we remove the underlying storage FILE as well, so deleted reels
+// don't keep silently consuming storage. We delete the file first (while we
+// still have the row + its media_url), then delete the DB row.
 async function deleteReelDB(id){
   const db=window.ruDB; if(!db)return;
   const isAdmin=document.getElementById('app').classList.contains('admin-unlocked');
-  if(!confirm(isAdmin?'Delete this reel? (admin/moderator action)':'Delete this reel?'))return;
+  if(!confirm(isAdmin?'Delete this reel? (admin/moderator action)':'Delete this reel? This permanently removes the video/photo.'))return;
   try{
+    // Find the reel so we know which file to remove from storage.
+    const reel=(state.dbReels||[]).find(r=>r.id===id);
+    let mediaUrl=reel&&reel.media_url;
+    // If it wasn't in memory (e.g. admin acting from elsewhere), fetch it.
+    if(!mediaUrl){
+      const one=await db.from('reels').select('media_url').eq('id',id).limit(1);
+      mediaUrl=one&&one.data&&one.data[0]&&one.data[0].media_url;
+    }
+    // Remove the storage file first (best-effort — a failure here shouldn't
+    // block removing the row, but we log it so orphans can be spotted).
+    const path=reelPathFromUrl(mediaUrl);
+    if(path){
+      const rm=await db.storage.from('reels').remove([path]);
+      if(rm.error)console.log('reel file remove warning:',rm.error.message);
+    }
+    // Now delete the database row.
     const {error}=await db.from('reels').delete().eq('id',id);
     if(error)throw error;
+    // Clean up any likes/comments rows for this reel so they don't linger.
+    // (If you added ON DELETE CASCADE in SQL these are already gone — this is
+    // a harmless belt-and-suspenders cleanup for older rows.)
+    try{ await db.from('reel_likes').delete().eq('reel_id',id); }catch(e){}
+    try{ await db.from('reel_comments').delete().eq('reel_id',id); }catch(e){}
     await loadReelsFromDB();
-  }catch(e){alert('Could not delete: '+(e&&e.message||e));}
+  }catch(e){console.log('deleteReelDB error:',e);alert('That reel couldn\'t be deleted. Please try again.');}
 }
 
 // Like / unlike a reel. Optimistic: flip the heart instantly, then sync the DB.
