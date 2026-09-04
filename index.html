@@ -852,7 +852,7 @@ function closeProfileMenu(){const m=document.getElementById('ruProfileMenu');if(
 function avatarHtml(prof, name, size){
   size=size||38;
   const url=prof&&prof.avatar_url;
-  const label=initials(name||(prof&&(prof.display_name||prof.username))||'?');
+  const label=initials(name||escapeHtml((prof&&(prof.display_name||prof.username))||'?'));
   if(url){
     return `<img src="${url}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="lazy">`;
   }
@@ -1341,7 +1341,7 @@ function openNotifications(){
     ? `<div style="font-size:12px;color:var(--mid);line-height:1.6;text-align:center;padding:10px">No new notifications.<br>When a fighter requests to join one of your gyms, it'll show up here.</div>`
     : `<div style="font-size:11px;color:var(--mid);margin-bottom:10px">Fighters requesting to join your gyms:</div>
        <div style="display:flex;flex-direction:column;gap:8px">
-       ${list.map(m=>{const nm=(m.profile&&(m.profile.display_name||m.profile.username))||'Fighter';return `
+       ${list.map(m=>{const nm=escapeHtml((m.profile&&(m.profile.display_name||m.profile.username))||'Fighter');return `
          <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r)">
            ${avatarHtml(m.profile,nm,38)}
            <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${nm}</div><div style="font-size:10px;color:var(--mid)">wants to join ${escapeHtml(m.gymName)}</div></div>
@@ -1366,7 +1366,7 @@ function renderGymPage(){
   }
   const isOwner=(g.owner_id===myId);
   const owner=state.viewGymOwner;
-  const ownerName=owner?(owner.display_name||owner.username||'Owner'):'Owner';
+  const ownerName=escapeHtml(owner?(owner.display_name||owner.username||'Owner'):'Owner');
 
   return `
     <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Gym</div><div style="width:34px"></div></div>
@@ -1402,7 +1402,7 @@ function renderGymPage(){
         ${g.address?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3);gap:12px"><span style="font-size:12px;color:var(--mid);white-space:nowrap">Address</span><span style="font-size:13px;color:var(--white);font-weight:500;text-align:right">${escapeHtml(g.address)}</span></div>`:''}
         ${g.contact?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3);gap:12px"><span style="font-size:12px;color:var(--mid);white-space:nowrap">Contact</span><span style="font-size:13px;color:var(--white);font-weight:500;text-align:right">${escapeHtml(g.contact)}</span></div>`:''}
         ${g.team?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3)"><span style="font-size:12px;color:var(--mid)">Team</span><span style="font-size:13px;color:var(--white);font-weight:500">${escapeHtml(g.team)}</span></div>`:''}
-        <div style="display:flex;justify-content:space-between;padding:9px 0"><span style="font-size:12px;color:var(--mid)">Owner</span><span onclick="openUserProfile('${g.owner_id}')" style="font-size:13px;color:var(--gold);font-weight:500;cursor:pointer">${escapeHtml(ownerName)} ›</span></div>
+        <div style="display:flex;justify-content:space-between;padding:9px 0"><span style="font-size:12px;color:var(--mid)">Owner</span><span onclick="openUserProfile('${g.owner_id}')" style="font-size:13px;color:var(--gold);font-weight:500;cursor:pointer">${ownerName} ›</span></div>
       </div>
 
       <div class="sec-head"><div class="sec-title">Roster</div></div>
@@ -1416,7 +1416,7 @@ function renderGymPage(){
           if(isOwner && members.pending.length>0){
             out+=`<div style="font-size:11px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Pending requests (${members.pending.length})</div>`;
             out+=members.pending.map(m=>{
-              const nm=(m.profile&&(m.profile.display_name||m.profile.username))||'Fighter';
+              const nm=escapeHtml((m.profile&&(m.profile.display_name||m.profile.username))||'Fighter');
               return `<div style="display:flex;align-items:center;gap:10px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
                 ${avatarHtml(m.profile,nm,38)}
                 <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${nm}</div><div style="font-size:10px;color:var(--mid)">wants to join</div></div>
@@ -1426,16 +1426,16 @@ function renderGymPage(){
             }).join('');
           }
           // Roster: owner first (always), then approved members with their position.
-          const ownerName=owner?(owner.display_name||owner.username||'Owner'):'Owner';
+          const ownerName2=escapeHtml(owner?(owner.display_name||owner.username||'Owner'):'Owner');
           out+=`<div style="font-size:11px;color:var(--mid);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin:6px 0">Roster</div>`;
           out+=`<div onclick="openUserProfile('${g.owner_id}')" style="display:flex;align-items:center;gap:10px;background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.25);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;cursor:pointer">
-            ${avatarHtml(owner,ownerName,38)}
-            <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${escapeHtml(ownerName)}</div><div style="font-size:10px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Owner</div></div>
+            ${avatarHtml(owner,ownerName2,38)}
+            <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${ownerName2}</div><div style="font-size:10px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Owner</div></div>
             <span style="color:var(--mid);font-size:16px">›</span>
           </div>`;
           if(members.approved.length>0){
             out+=members.approved.map(m=>{
-              const nm=(m.profile&&(m.profile.display_name||m.profile.username))||'Member';
+              const nm=escapeHtml((m.profile&&(m.profile.display_name||m.profile.username))||'Member');
               const info=(m.profile&&m.profile.role_info)||{};
               const mRole=(m.profile&&m.profile.role)||'fighter';
               // Position label: their listed role; for fighters show sport/weight as detail.
@@ -2243,8 +2243,8 @@ function renderDirectory(){
   const showGyms=(filter==='all'||filter==='gyms');
   const gymsToShow=showGyms?gyms:[];
 
-  const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors'],['court','Court Sports']]
-    .map(([f,lbl])=>`<div class="disco-chip ${filter===f?'active':''}" onclick="setFindFilter('${f}')">${lbl}${f==='court'?' · soon':''}</div>`).join('');
+  const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors'],['court','Court Sports'],['social','Social Events']]
+    .map(([f,lbl])=>`<div class="disco-chip ${filter===f?'active':''}" onclick="setFindFilter('${f}')">${lbl}${(f==='court'||f==='social')?' · soon':''}</div>`).join('');
 
   const head=`
     <div style="background:rgba(245,166,35,.05);border-bottom:1px solid rgba(245,166,35,.12);padding:8px 18px;font-size:10px;color:var(--gold);line-height:1.4">⏳ Self-listed members · not yet verified by RoundUp</div>
@@ -2254,6 +2254,9 @@ function renderDirectory(){
   // show an honest explanation instead of filtering into an empty state.
   if(filter==='court'){
     return head+`<div class="empty"><div class="empty-icon">🏀</div><div class="empty-title">Court Sports — Coming Soon</div><div class="empty-text">Basketball and Pickleball aren't live on RoundUp yet. Combat sports are fully active — tap "All" or "Fighters" to browse them.</div><button class="empty-btn" onclick="setFindFilter('all')">Back to all members</button></div>`;
+  }
+  if(filter==='social'){
+    return head+`<div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">Social Events — Coming Soon</div><div class="empty-text">Weddings, reunions, fundraisers, and brand showcases aren't live on RoundUp yet. Combat sports are fully active — tap "All" or "Fighters" to browse them.</div><button class="empty-btn" onclick="setFindFilter('all')">Back to all members</button></div>`;
   }
 
   if(state.dirLoading && all.length===0 && gyms.length===0){
@@ -2271,7 +2274,7 @@ function renderDirectory(){
   }
 
   const card=(p)=>{
-    const name=p.display_name||p.username||'Creator';
+    const name=escapeHtml(p.display_name||p.username||'Creator');
     const info=p.role_info||{};
     let sub='';
     if(p.role==='fighter')sub=[info.sport,info.weight?info.weight+' lbs':'',info.gym&&info.gym!=='Independent / not listed yet'?info.gym:''].filter(Boolean).join(' · ');
@@ -3825,7 +3828,7 @@ function renderProfileDetail(){
     return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Profile</div><div style="width:34px"></div></div><div class="empty"><div class="empty-icon">🔎</div><div class="empty-title">Profile not found</div></div>`;
   }
 
-  const name=p.display_name||p.username||'Creator';
+  const name=escapeHtml(p.display_name||p.username||'Creator');
   const info=p.role_info||{};
   const roleLabel=p.role?(ROLE_LABELS[p.role]||p.role):null;
   const roleColor={fighter:'var(--red)',gym:'var(--gold)',coach:'var(--purple)',official:'var(--green)',sponsor:'var(--blue)'}[p.role]||'var(--light)';
@@ -4641,7 +4644,7 @@ async function openNewDM(){
       ? `<div style="font-size:12px;color:var(--mid);line-height:1.6">No other accounts found yet. Once other people sign up, they'll show here and you can message them.</div>`
       : `<div style="font-size:11px;color:var(--mid);margin-bottom:10px">Tap someone to start a conversation.</div>
          <div style="display:flex;flex-direction:column;gap:8px">
-         ${people.map(p=>{const n=p.display_name||p.username||'Creator';return `
+         ${people.map(p=>{const n=escapeHtml(p.display_name||p.username||'Creator');return `
            <div onclick="closeActionModal();openConversation('${p.id}')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
              <div style="width:36px;height:36px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:13px">${initials(n)}</div>
              <div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--white)">${n}</div>${p.username?`<div style="font-size:11px;color:var(--mid)">@${p.username}</div>`:''}</div>
@@ -5760,7 +5763,9 @@ function openVenueRentalDashboard(){
           <div style="font-size:10px;color:var(--mid)">Fighter slots booked</div>
         </div>
       </div>
-      ${listings.map(l=>`
+      ${listings.length===0
+        ? `<div style="background:var(--dark3);border-radius:8px;padding:20px 14px;text-align:center"><div style="font-size:12px;color:var(--mid)">No time slots listed yet. Add one below to start renting out fighter slots.</div></div>`
+        : listings.map(l=>`
         <div style="background:var(--dark3);border-radius:8px;padding:12px">
           <div style="font-size:13px;font-weight:600;color:var(--white);margin-bottom:4px">${l.date} · ${l.timeStart}–${l.timeEnd}</div>
           <div style="font-size:11px;color:var(--mid);margin-bottom:6px">${l.slotsFilled}/${l.slots} slots filled · $${(l.slotsFilled||0)*l.rentalFeePerFighter} rental income</div>
@@ -5792,7 +5797,7 @@ function openAddVenueListing(){
       </div>
       <div>
         <div style="font-size:11px;color:var(--mid);margin-bottom:4px">What's included</div>
-        <input id="vlIncludes" type="text" placeholder="Ring, corner equipment, locker rooms..." style="width:100%;background:var(--dark3);border:1px solid var(--dark4);border-radius:6px;padding:10px;color:var(--white);font-size:12px;font-family:'DM Sans',sans-serif">
+        <input id="vlIncludes" type="text" placeholder="Tables, chairs, sound system, parking..." style="width:100%;background:var(--dark3);border:1px solid var(--dark4);border-radius:6px;padding:10px;color:var(--white);font-size:12px;font-family:'DM Sans',sans-serif">
       </div>
       <div style="font-size:10px;color:var(--mid);line-height:1.5;background:rgba(42,127,232,.06);border:1px solid rgba(42,127,232,.2);border-radius:6px;padding:8px">Each fighter pays their slot fee individually. This is rental income — separate from event revenue. Rental receipts are automatically titled "Venue Time-Block Rental Agreement."</div>
     </div>
@@ -5805,7 +5810,7 @@ function openAddVenueListing(){
     const end=document.getElementById('vlEnd')?.value.trim();
     const slots=parseInt(document.getElementById('vlSlots')?.value)||10;
     const fee=parseInt(document.getElementById('vlFee')?.value)||75;
-    const includes=document.getElementById('vlIncludes')?.value.trim()||'Ring, corner equipment, locker rooms';
+    const includes=document.getElementById('vlIncludes')?.value.trim()||'Tables, chairs, sound system, parking';
     if(!date||!start){alert('Please fill in date and start time.');return;}
     if(!gym.venueListings)gym.venueListings=[];
     gym.venueListings.push({id:'vl'+Date.now(),gymId,date,timeStart:start,timeEnd:end,slots,slotsFilled:0,rentalFeePerFighter:fee,includes,status:'open',fighters:[]});
@@ -6233,7 +6238,7 @@ function renderCreatorHome(){
     ? `<div class="h-scroll">
         ${reels.map(r=>{
           const prof=r.profiles||{};
-          const nm=(prof.display_name||prof.username)||'Creator';
+          const nm=escapeHtml((prof.display_name||prof.username)||'Creator');
           const img=r.media_url?(r.media_type==='video'
             ? `<video src="${r.media_url}#t=0.1" muted playsinline preload="metadata" style="width:100%;height:96px;object-fit:cover;display:block;background:#000"></video>`
             : `<img src="${r.media_url}" style="width:100%;height:96px;object-fit:cover;display:block" loading="lazy">`):`<div style="width:100%;height:96px;background:linear-gradient(135deg,#1a0000,#0d1a2d);display:flex;align-items:center;justify-content:center;font-size:24px">🥊</div>`;
@@ -6286,11 +6291,11 @@ function renderCreatorHome(){
         </div>`;
       });
       people.forEach(p=>{
-        const nm=(p.display_name||p.username)||'Creator';
+        const nm=escapeHtml((p.display_name||p.username)||'Creator');
         const rc={fighter:'var(--red)',coach:'var(--purple)',official:'var(--green)',sponsor:'var(--blue)'}[p.role]||'var(--light)';
         cards+=`<div onclick="openUserProfile('${p.id}')" style="min-width:130px;max-width:130px;flex-shrink:0;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:14px 10px;text-align:center;cursor:pointer">
           <div style="display:flex;justify-content:center;margin-bottom:8px">${avatarHtml(p,nm,48)}</div>
-          <div style="font-size:12px;font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(nm)}</div>
+          <div style="font-size:12px;font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nm}</div>
           <div style="font-size:10px;color:${rc};text-transform:uppercase;letter-spacing:.5px">${p.role?(ROLE_LABELS[p.role]||p.role):'Creator'}</div>
         </div>`;
       });
@@ -7330,7 +7335,7 @@ async function openShareReel(reelId){
       ? `<div style="font-size:12px;color:var(--mid);line-height:1.6">No other accounts to send to yet. Once others sign up, they'll show here.</div>`
       : `<div style="font-size:11px;color:var(--mid);margin-bottom:10px">Tap someone to send them this reel.</div>
          <div style="display:flex;flex-direction:column;gap:8px">
-         ${people.map(p=>{const n=p.display_name||p.username||'Creator';return `
+         ${people.map(p=>{const n=escapeHtml(p.display_name||p.username||'Creator');return `
            <div onclick="sendReelToUser('${reelId}','${p.id}')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
              <div style="width:36px;height:36px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:13px">${initials(n)}</div>
              <div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--white)">${n}</div>${p.username?`<div style="font-size:11px;color:var(--mid)">@${p.username}</div>`:''}</div>
@@ -7429,7 +7434,7 @@ function renderReelsFeed(role){
       ? `<div class="empty" style="padding:50px 20px"><div class="empty-icon">🎬</div><div class="empty-title">No reels yet</div><div class="empty-text">Be the first — tap + Post to share something.</div></div>`
       : reels.map(r=>{
           const prof=r.profiles||{};
-          const name=prof.display_name||prof.username||'Creator';
+          const name=escapeHtml(prof.display_name||prof.username||'Creator');
           const canDelete = isAdmin || (myId && r.author_id===myId);
           const comments=state.dbComments[r.id]||[];
           const showComments=state.openComments===r.id;
@@ -7460,7 +7465,7 @@ function renderReelsFeed(role){
             ${showComments?`
               <div style="margin-top:12px;border-top:1px solid var(--dark3);padding-top:12px">
                 ${comments.map(c=>{
-                  const cn=(c.profiles&&(c.profiles.display_name||c.profiles.username))||'Creator';
+                  const cn=escapeHtml((c.profiles&&(c.profiles.display_name||c.profiles.username))||'Creator');
                   const canDelC = isAdmin || (myId && c.author_id===myId);
                   return `<div style="display:flex;gap:8px;margin-bottom:10px">
                     <div style="width:26px;height:26px;border-radius:50%;background:var(--dark4);color:var(--lighter);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0">${initials(cn)}</div>
