@@ -2214,6 +2214,7 @@ function renderOfficialHome(){
 function loadDirectory(){
   const db=window.ruDB; if(!db)return;
   state.dirLoading=true;
+  state.dirError=false;
   // People with a self-listed role (excluding the old 'gym' role — gyms are
   // now their own entity, loaded separately below).
   db.from('profiles').select('id,display_name,username,avatar_url,role,role_info').not('role','is',null).limit(500)
@@ -2221,13 +2222,13 @@ function loadDirectory(){
       state.directory=(res.data||[]).filter(p=>p.role!=='gym');
       state.dirLoading=false;
       if(state.currentTab==='find')render();
-    }).catch(function(e){state.dirLoading=false;console.log('loadDirectory error:',e&&e.message);});
+    }).catch(function(e){state.dirLoading=false;state.dirError=true;console.log('loadDirectory error:',e&&e.message);if(state.currentTab==='find')render();});
   // Real gym entities.
   db.from('gyms').select('id,name,location,sports,owner_id').limit(500)
     .then(function(res){
       state.dirGyms=res.data||[];
       if(state.currentTab==='find')render();
-    }).catch(function(e){console.log('loadDirectory gyms error:',e&&e.message);});
+    }).catch(function(e){state.dirError=true;console.log('loadDirectory gyms error:',e&&e.message);if(state.currentTab==='find')render();});
 }
 
 function renderDirectory(){
@@ -2261,9 +2262,11 @@ function renderDirectory(){
   // When the Gyms filter is on, the gyms list carries the content.
   if(filter==='gyms'){
     if(gymsToShow.length===0){
+      if(state.dirError)return head+`<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn't load gyms</div><div class="empty-text">Something went wrong loading the directory.</div><button class="empty-btn" onclick="loadDirectory()">Tap to retry</button></div>`;
       return head+`<div class="empty"><div class="empty-icon">🏋</div><div class="empty-title">No gyms yet</div><div class="empty-text">No gyms have been created yet. Create one from your Profile to be the first.</div><button class="empty-btn" onclick="setTab('profile')">Create a gym</button></div>`;
     }
   } else if(list.length===0 && gymsToShow.length===0){
+    if(state.dirError)return head+`<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn't load</div><div class="empty-text">Something went wrong loading the directory.</div><button class="empty-btn" onclick="loadDirectory()">Tap to retry</button></div>`;
     return head+`<div class="empty"><div class="empty-icon">🔎</div><div class="empty-title">Nobody here yet</div><div class="empty-text">No one has listed themselves${want?(' as a '+want):''} yet. Add your own role from your Profile to be the first.</div><button class="empty-btn" onclick="setTab('profile')">Set my role</button></div>`;
   }
 
@@ -2482,13 +2485,16 @@ function renderInbox(role){
   if(state.dmInboxLoading && list.length===0){
     return header+`<div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading messages…</div></div>`;
   }
+  if(state.dmInboxError && list.length===0){
+    return header+`<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn't load messages</div><div class="empty-text">Something went wrong loading your inbox.</div><button class="empty-btn" onclick="loadInbox()">Tap to retry</button></div>`;
+  }
   if(list.length===0){
     return header+`<div class="empty"><div class="empty-icon">💬</div><div class="empty-title">No messages yet</div><div class="empty-text">Tap + New to start a conversation with someone on RoundUp.</div><button class="empty-btn" onclick="openNewDM()">Start a chat</button></div>`;
   }
   return header+`
     <div class="chat-list">
       ${list.map(c=>{
-        const name=(c.profile&&(c.profile.display_name||c.profile.username))||'Creator';
+        const name=escapeHtml((c.profile&&(c.profile.display_name||c.profile.username))||'Creator');
         return `
           <div class="chat-row" onclick="openConv('${c.otherId}')">
             <div class="chat-avatar" style="background:var(--red);color:#fff">${initials(name)}</div>
@@ -2513,6 +2519,7 @@ async function loadInbox(){
   if(!user)return;
   const myId=user.id;
   state.dmInboxLoading=true;
+  state.dmInboxError=false;
   try{
     const {data,error}=await db.from('messages')
       .select('id,sender_id,recipient_id,body,created_at')
@@ -2536,6 +2543,7 @@ async function loadInbox(){
     state.dmInbox=order.map(id=>seen[id]);
   }catch(e){
     console.log('loadInbox error:',e&&e.message);
+    state.dmInboxError=true;
   }
   state.dmInboxLoading=false;
   if(state.currentTab==='inbox'&&state.currentScreen==='main')render();
@@ -4512,7 +4520,7 @@ function renderConversation(){
     setTimeout(()=>loadDMThread(otherId),0);
   }
   const prof=state.dmThreadProfile||{};
-  const name=(prof.display_name||prof.username)||'Loading…';
+  const name=escapeHtml((prof.display_name||prof.username)||'Loading…');
   const msgs=(state.dmThreadOtherId===otherId)?(state.dmThreadMsgs||[]):[];
   return `
     <div class="conv-header">
@@ -7119,7 +7127,9 @@ state.dbComments = state.dbComments || {};
 state.reelsLoading = false;
 
 function timeAgo(iso){
-  const s=Math.floor((Date.now()-new Date(iso).getTime())/1000);
+  const ms=iso?new Date(iso).getTime():NaN;
+  if(isNaN(ms))return '';
+  const s=Math.floor((Date.now()-ms)/1000);
   if(s<60)return 'just now';
   if(s<3600)return Math.floor(s/60)+'m';
   if(s<86400)return Math.floor(s/3600)+'h';
