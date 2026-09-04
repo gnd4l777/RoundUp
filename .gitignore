@@ -1,0 +1,9 @@
+# Local coordination files for the RoundUp help desk automation.
+# These live only on this machine and were never meant to be part of the
+# app's git history — ignoring them means they can't accidentally get
+# bundled into a pull request, and a `git reset --hard` never wipes them.
+DIGEST.md
+PENDING_APPROVAL.md
+TASKS.md
+.checkin-logs/
+.claude-session.lock
