@@ -58,6 +58,42 @@
 --      carries but this draft was missing: venue_listing,
 --      venue_rental_fee_per_fighter, created_by_fighter, fighter_draft_card_id.
 --   6. Added a check that `fights` can only ever hold a JSON array.
+--
+-- REVISION 2 (this version): addressed reviewer findings on revision 1:
+--   7. sponsor_tiers was excluded from events_bouts_public on the assumption
+--      it was financial/sensitive like total_pay/sponsor_pool. It isn't:
+--      index.html renders the full sponsor-tiers block (name, price, perks,
+--      "Claimed by X") publicly to every role on a published event
+--      (renderEventPublishedDetail, ~line 4783), and the sponsor-browse list
+--      also shows open tiers with prices publicly (~line 2153). `sponsors`
+--      (an array of the same claimedBy-style ids) was already included in the
+--      view and is rendered publicly elsewhere, so sponsor_tiers isn't
+--      actually more sensitive than what was already exposed. Added
+--      sponsor_tiers back into events_bouts_public, unredacted. total_pay,
+--      sponsor_pool, and officials remain excluded — those are genuinely
+--      owner-only in the UI (renderEventPublishedDetail's gym-net breakdown,
+--      ~line 5001, and the fan-view branch just above it that shows zero
+--      financial data).
+--   8. This view intentionally omits `WITH (security_invoker = true)` — it
+--      needs to run with the view owner's privileges to bypass events_bouts'
+--      owner-only RLS and actually surface published events to anon. Added a
+--      comment directly above CREATE VIEW warning that Supabase's built-in
+--      linter will flag this as a "Security Definer View" error, and that
+--      "fixing" that lint warning by adding security_invoker = true will
+--      silently break public event browsing (the view will return zero rows
+--      for anon, with no error anywhere) — see that comment before touching
+--      this view's security mode.
+--   9. The 4 columns added in revision 1 (venue_listing,
+--      venue_rental_fee_per_fighter, created_by_fighter,
+--      fighter_draft_card_id) were only inside the events_bouts
+--      CREATE TABLE IF NOT EXISTS block. If this migration is ever re-run
+--      against a partially-applied older version of the table (one that
+--      predates those columns), IF NOT EXISTS would skip re-creating the
+--      table entirely, silently leaving those 4 columns missing — and the
+--      CREATE VIEW below would then fail referencing missing columns. Added
+--      explicit ALTER TABLE ... ADD COLUMN IF NOT EXISTS statements for all
+--      4 columns right after the events_bouts table block, so a partial
+--      re-run self-heals instead of failing confusingly.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -150,14 +186,16 @@ create policy "events_general_delete_own"
 --    fights[] and officials{} are stored as JSONB rather than fully normalized
 --    — see PR description / report for why.
 --
---    IMPORTANT: this table holds financial fields (total_pay, sponsor_pool),
---    the officials assignment map, and sponsor_tiers (which embeds a
---    claimedBy field). None of these should be anon-readable — index.html
---    itself only shows the commission pool to the card owner (isOwner check
---    around the event-list rendering) and hides officials from fans. So this
---    table has NO public-read policy at all; public browsing goes through the
---    `events_bouts_public` view below instead, which allowlists only the
---    safe columns.
+--    IMPORTANT: this table holds financial fields (total_pay, sponsor_pool)
+--    and the officials assignment map, neither of which should be
+--    anon-readable — index.html itself only shows the commission-pool
+--    breakdown to the card owner and hides officials from fans. sponsor_tiers
+--    (which embeds a claimedBy field) is NOT in that category — it's rendered
+--    publicly in index.html and is intentionally included in the public view
+--    below. So this table has NO public-read policy at all; public browsing
+--    goes through the `events_bouts_public` view below instead, which
+--    allowlists only the safe columns (including sponsor_tiers, excluding
+--    total_pay/sponsor_pool/officials).
 -- ----------------------------------------------------------------------------
 create table if not exists public.events_bouts (
   id uuid primary key default gen_random_uuid(),
@@ -203,9 +241,11 @@ create table if not exists public.events_bouts (
   -- NOT publicly readable — see events_bouts_public view below.
   officials jsonb not null default '{}'::jsonb,
   sponsors jsonb not null default '[]'::jsonb,
-  -- sponsor_tiers embeds a claimedBy field per tier — NOT publicly readable
-  -- (whole column excluded from events_bouts_public; JSONB makes redacting
-  -- just claimedBy impractical at the column-grant level).
+  -- sponsor_tiers embeds a claimedBy field per tier. Unlike `officials`
+  -- above, this IS meant to be public — index.html renders the full
+  -- sponsor-tiers block (name, price, perks, "Claimed by X") to every role
+  -- on a published event, and it's included unredacted in
+  -- events_bouts_public below.
   sponsor_tiers jsonb not null default '[]'::jsonb,
   total_pay numeric not null default 0,
   sponsor_pool numeric not null default 0,
@@ -213,6 +253,19 @@ create table if not exists public.events_bouts (
     check (status in ('draft','published','cancelled','completed')),
   created_at timestamptz not null default now()
 );
+
+-- Self-heal against a partial re-run: these 4 columns were added to the
+-- CREATE TABLE IF NOT EXISTS block above in a later revision than the rest of
+-- this table. If this migration ever runs again against an older, already-
+-- applied version of events_bouts that predates them, CREATE TABLE IF NOT
+-- EXISTS would silently skip re-creating the table (and thus skip adding
+-- these columns), and events_bouts_public below would then fail to create,
+-- referencing columns that don't exist. These ALTER TABLE statements make
+-- that re-run self-heal instead of failing confusingly.
+alter table public.events_bouts add column if not exists venue_listing text;
+alter table public.events_bouts add column if not exists venue_rental_fee_per_fighter numeric;
+alter table public.events_bouts add column if not exists created_by_fighter uuid references auth.users(id) on delete set null;
+alter table public.events_bouts add column if not exists fighter_draft_card_id text;
 
 create index if not exists events_bouts_gym_id_idx on public.events_bouts(gym_id);
 create index if not exists events_bouts_owner_id_idx on public.events_bouts(owner_id);
@@ -252,16 +305,42 @@ create policy "events_bouts_delete_own"
 -- ----------------------------------------------------------------------------
 -- 2a) events_bouts_public — the only public-facing read surface for bouts.
 --     Explicitly allowlists safe/browsable columns only. Deliberately
---     EXCLUDES: total_pay, sponsor_pool, officials, sponsor_tiers (financial
---     data and the officials role->user-id map — none of this is shown to
---     fans/anon in index.html today; see renderEventListItem()'s isOwner
---     check around the commission-pool display, and renderEventPublishedDetail
---     which hides the whole "Officials" section for role==='fan').
+--     EXCLUDES: total_pay, sponsor_pool, officials (financial data and the
+--     officials role->user-id map — none of this is shown to fans/anon in
+--     index.html today; see renderEventPublishedDetail's gym-net breakdown,
+--     which is explicitly "visible only to you as the card owner", and its
+--     fan-view branch just above that, which shows zero financial data).
+--
+--     sponsor_tiers IS included here (unlike an earlier draft of this view) —
+--     it's meant to be public. index.html renders the full sponsor-tiers
+--     block (tier name, price, perks, "Claimed by X") to every role on a
+--     published event (renderEventPublishedDetail), and the sponsor-browse
+--     list shows open tiers with prices publicly too. `sponsors` (an array of
+--     the same claimedBy-style ids) is already public here, so sponsor_tiers'
+--     ids aren't any more sensitive.
 --
 --     The status filter is applied directly in this view's own query (not
 --     inherited from a base-table RLS policy), so it holds regardless of how
 --     Postgres resolves RLS-vs-view-owner semantics — completed events stay
 --     browsable alongside published ones, drafts/cancelled never appear.
+--
+--     ⚠️ SECURITY DEFINER BY DESIGN — DO NOT ADD security_invoker = true.
+--     This view deliberately has NO `WITH (security_invoker = true)` clause,
+--     so it runs with the view owner's privileges rather than the querying
+--     user's. That's required here: events_bouts' only SELECT policy is
+--     owner-only ("events_bouts_select_own"), so an invoker-rights view would
+--     inherit that same restriction and anon/public callers would get zero
+--     rows back — silently, with no error anywhere. Running as the view
+--     owner is what lets this view bypass that base-table RLS and actually
+--     surface published/completed events to anon.
+--     Supabase's built-in database linter (Advisors panel) WILL flag this as
+--     a "Security Definer View" ERROR. That warning is expected and, in this
+--     specific case, a false positive — do not "fix" it by adding
+--     security_invoker = true. Doing so will not throw an error; it will
+--     just make public event browsing silently return nothing. If this
+--     tradeoff ever needs revisiting, it has to come with an equivalent
+--     anon-readable RLS policy on the base table (or a SECURITY DEFINER
+--     function instead of a plain view), not a one-line flag flip.
 -- ----------------------------------------------------------------------------
 drop view if exists public.events_bouts_public;
 create view public.events_bouts_public as
@@ -284,6 +363,7 @@ select
   sanctioning_status,
   fights,
   sponsors,
+  sponsor_tiers,
   status,
   created_at
 from public.events_bouts
