@@ -59,21 +59,28 @@
 --      venue_rental_fee_per_fighter, created_by_fighter, fighter_draft_card_id.
 --   6. Added a check that `fights` can only ever hold a JSON array.
 --
--- REVISION 2 (this version): addressed reviewer findings on revision 1:
---   7. sponsor_tiers was excluded from events_bouts_public on the assumption
---      it was financial/sensitive like total_pay/sponsor_pool. It isn't:
---      index.html renders the full sponsor-tiers block (name, price, perks,
---      "Claimed by X") publicly to every role on a published event
---      (renderEventPublishedDetail, ~line 4783), and the sponsor-browse list
---      also shows open tiers with prices publicly (~line 2153). `sponsors`
---      (an array of the same claimedBy-style ids) was already included in the
---      view and is rendered publicly elsewhere, so sponsor_tiers isn't
---      actually more sensitive than what was already exposed. Added
---      sponsor_tiers back into events_bouts_public, unredacted. total_pay,
---      sponsor_pool, and officials remain excluded — those are genuinely
---      owner-only in the UI (renderEventPublishedDetail's gym-net breakdown,
---      ~line 5001, and the fan-view branch just above it that shows zero
---      financial data).
+-- REVISION 2 (this version): a prior instruction to add sponsor_tiers back
+-- into events_bouts_public was based on a misattributed line reference and
+-- has been reverted. Re-checked against index.html directly:
+--   7. The only two places index.html renders full sponsor-tier detail (tier
+--      name, price, perks, "Claimed by X") are both scoped to status==='draft'
+--      events: renderEventDraftDetail (~line 4783, NOT renderEventPublished-
+--      Detail as a previous revision of this comment claimed), and the
+--      sponsor-browse list's draftCards filter (~line 2153, status==='draft'
+--      only). Drafts are owner-only regardless of this view, so nothing
+--      currently rendered actually needs sponsor_tiers exposed through
+--      events_bouts_public. Worse, including it would create a real leak:
+--      the view already excludes sponsor_pool as owner-only financial data
+--      (see renderEventPublishedDetail's gym-net "Event P&L — Card Owner
+--      Only" breakdown, ~line 5300, computed as
+--      sponsorRevenue = e.sponsorTiers.reduce((s,t)=>s+(t.claimedBy?t.price:0),0)).
+--      Exposing sponsor_tiers publicly would let anyone reconstruct that exact
+--      owner-only number from the per-tier prices and claimedBy ids —
+--      excluding sponsor_pool while including sponsor_tiers cancels itself
+--      out. sponsor_tiers is therefore excluded from events_bouts_public, same
+--      as total_pay, sponsor_pool, and officials. `sponsors` (the plain array
+--      of claimed-by ids/names used for the public "Presented by" line) is
+--      NOT the same data and remains included below — that one is fine.
 --   8. This view intentionally omits `WITH (security_invoker = true)` — it
 --      needs to run with the view owner's privileges to bypass events_bouts'
 --      owner-only RLS and actually surface published events to anon. Added a
@@ -190,12 +197,14 @@ create policy "events_general_delete_own"
 --    and the officials assignment map, neither of which should be
 --    anon-readable — index.html itself only shows the commission-pool
 --    breakdown to the card owner and hides officials from fans. sponsor_tiers
---    (which embeds a claimedBy field) is NOT in that category — it's rendered
---    publicly in index.html and is intentionally included in the public view
---    below. So this table has NO public-read policy at all; public browsing
---    goes through the `events_bouts_public` view below instead, which
---    allowlists only the safe columns (including sponsor_tiers, excluding
---    total_pay/sponsor_pool/officials).
+--    (which embeds a claimedBy field) is in the same category: the only two
+--    places index.html renders full sponsor-tier detail are both scoped to
+--    status==='draft' events (owner-only regardless), so it's excluded from
+--    the public view too, not because it was overlooked but because nothing
+--    published actually needs it exposed. So this table has NO public-read
+--    policy at all; public browsing goes through the `events_bouts_public`
+--    view below instead, which allowlists only the safe columns (excluding
+--    total_pay/sponsor_pool/officials/sponsor_tiers).
 -- ----------------------------------------------------------------------------
 create table if not exists public.events_bouts (
   id uuid primary key default gen_random_uuid(),
@@ -241,11 +250,13 @@ create table if not exists public.events_bouts (
   -- NOT publicly readable — see events_bouts_public view below.
   officials jsonb not null default '{}'::jsonb,
   sponsors jsonb not null default '[]'::jsonb,
-  -- sponsor_tiers embeds a claimedBy field per tier. Unlike `officials`
-  -- above, this IS meant to be public — index.html renders the full
-  -- sponsor-tiers block (name, price, perks, "Claimed by X") to every role
-  -- on a published event, and it's included unredacted in
-  -- events_bouts_public below.
+  -- sponsor_tiers embeds a claimedBy field per tier and per-tier pricing.
+  -- index.html only ever renders the full sponsor-tiers block (name, price,
+  -- perks, "Claimed by X") on status==='draft' events, which are owner-only
+  -- regardless of this table's RLS. It is excluded from events_bouts_public
+  -- below, same as total_pay/sponsor_pool/officials — exposing it publicly
+  -- would let anyone reconstruct the owner-only sponsor-revenue figure from
+  -- per-tier prices and claimedBy ids.
   sponsor_tiers jsonb not null default '[]'::jsonb,
   total_pay numeric not null default 0,
   sponsor_pool numeric not null default 0,
@@ -311,13 +322,18 @@ create policy "events_bouts_delete_own"
 --     which is explicitly "visible only to you as the card owner", and its
 --     fan-view branch just above that, which shows zero financial data).
 --
---     sponsor_tiers IS included here (unlike an earlier draft of this view) —
---     it's meant to be public. index.html renders the full sponsor-tiers
---     block (tier name, price, perks, "Claimed by X") to every role on a
---     published event (renderEventPublishedDetail), and the sponsor-browse
---     list shows open tiers with prices publicly too. `sponsors` (an array of
---     the same claimedBy-style ids) is already public here, so sponsor_tiers'
---     ids aren't any more sensitive.
+--     sponsor_tiers is EXCLUDED here too, same reasoning. The only two places
+--     index.html renders full sponsor-tier detail (tier name, price, perks,
+--     "Claimed by X") are both scoped to status==='draft' events —
+--     renderEventDraftDetail (~line 4783) and the sponsor-browse list's
+--     draftCards filter (~line 2153) — and drafts are owner-only regardless
+--     of this view, since it's already filtered to published/completed only.
+--     Including sponsor_tiers here would also leak the owner-only sponsor
+--     revenue figure (computed in renderEventPublishedDetail's P&L breakdown
+--     as sum of claimed tier prices), reconstructable from per-tier price and
+--     claimedBy. `sponsors` (a plain array of claimed-by ids/names used for
+--     the public "Presented by" line) is not the same data and stays included
+--     below — that one's fine to expose.
 --
 --     The status filter is applied directly in this view's own query (not
 --     inherited from a base-table RLS policy), so it holds regardless of how
@@ -363,7 +379,6 @@ select
   sanctioning_status,
   fights,
   sponsors,
-  sponsor_tiers,
   status,
   created_at
 from public.events_bouts
