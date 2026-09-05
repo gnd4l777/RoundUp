@@ -793,7 +793,6 @@ const DEFAULT_STATE={
   fanMessages:[],
   officialBookings:[],
   sponsorDeals:[],
-  credentialUnlockRequests:[],
   verificationStatus:{ _pendingQueue:[] },
   fighterDraftCards:[],
 };
@@ -6376,9 +6375,19 @@ function openCredentialUnlock(unlockType){
     <div style="font-size:11px;color:var(--lighter);line-height:1.5;margin-bottom:12px">Upload the documents below. RoundUp admin reviews within 1–2 business days. ${unlockType==='fighter'?'Until verified, <strong style="color:var(--red)">all bout requests are automatically denied</strong> — not manually reviewed, automatically blocked.':''}</div>
     ${cfg.docs.map(doc=>`<div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:8px;padding:10px 12px;margin-bottom:6px"><div style="font-size:12px;font-weight:600;color:var(--white);margin-bottom:2px">${doc}</div><div style="background:var(--dark3);border-radius:6px;height:30px;display:flex;align-items:center;justify-content:center;margin-top:6px;font-size:11px;color:var(--mid);cursor:pointer">+ Tap to upload</div></div>`).join('')}
   `,'Submit for Review',()=>{
-    if(!state.credentialUnlockRequests)state.credentialUnlockRequests=[];
+    // Feeds into the same verification pipeline as openVerifyForm/_pendingQueue so
+    // the existing admin verification dashboard (renderAdminVerifyDashboard) and
+    // requireVerified() gate both see and can act on this submission. This used to
+    // push into a separate credentialUnlockRequests array that nothing ever read —
+    // submitting here did nothing and no admin action could unblock the fighter.
+    if(!state.verificationStatus)state.verificationStatus={_pendingQueue:[]};
+    if(!state.verificationStatus._pendingQueue)state.verificationStatus._pendingQueue=[];
     const myId=ROLE_PROFILES[state.currentRole]?.userId;
-    state.credentialUnlockRequests.push({userId:myId,unlockType,submittedAt:new Date().toLocaleDateString('en-US'),status:'pending'});
+    if(myId&&state.verificationStatus[myId]!=='verified'){
+      state.verificationStatus[myId]='pending';
+      if(!state.verificationStatus._pendingQueue.includes(myId))
+        state.verificationStatus._pendingQueue.push(myId);
+    }
     saveState();render();
     setTimeout(()=>alert('Credentials submitted!\n\n'+cfg.label+' pending admin review (1–2 business days).\n\nYou\'ll receive an in-app message when your review is complete.'),200);
   });
