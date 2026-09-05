@@ -3694,7 +3694,7 @@ function renderFighterDashboard(u){
       <div class="bd-row"><div class="bd-l">Expires</div><div class="bd-r">${u.license?.expires||'N/A'}</div></div>
       <div class="bd-row"><div class="bd-l">USA Boxing membership</div><div class="bd-r pos">Active ✓</div></div>
       <div class="bd-row"><div class="bd-l">FightFax status</div><div class="bd-r pos">Clear ✓</div></div>
-      ${suspension&&suspension.suspended?`<div class="bd-row"><div class="bd-l" style="color:var(--red)">Suspension</div><div class="bd-r neg">${suspension.days} days</div></div>`:''}
+      ${suspension&&suspension.suspended?`<div class="bd-row"><div class="bd-l" style="color:var(--red)">Suspension</div><div class="bd-r neg">${suspension.days} day${suspension.days===1?'':'s'} remaining</div></div>`:''}
     </div>
     <div style="padding:0 18px 14px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
       <div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r-sm);padding:14px;cursor:pointer" onclick="openFindBout()">
@@ -5983,9 +5983,16 @@ function checkFighterSuspension(fighterId){
   // OSAC 92:10-3-8: TKO = 30 day min, KO = 45 day min
   // Demo check: look for TKO/KO loss in recent fight history
   const lastFight=u.lastFightResult||null;
-  if(lastFight==='tko_loss')return {suspended:true,days:30,reason:'TKO loss — 30-day mandatory suspension (OSAC 92:10-5-12)'};
-  if(lastFight==='ko_loss')return {suspended:true,days:45,reason:'KO loss — 45-day mandatory suspension (OSAC 92:10-5-12)'};
-  return {suspended:false};
+  if(lastFight!=='tko_loss'&&lastFight!=='ko_loss')return {suspended:false};
+  const windowDays=lastFight==='tko_loss'?30:45;
+  const label=lastFight==='tko_loss'?'TKO':'KO';
+  // Old demo data written before suspension dates were tracked has no timestamp —
+  // fail open (treat as not suspended) rather than lock the fighter out forever.
+  if(!u.lastFightResultDate)return {suspended:false};
+  const daysElapsed=Math.floor((Date.now()-u.lastFightResultDate)/86400000);
+  if(daysElapsed>=windowDays)return {suspended:false};
+  const daysRemaining=windowDays-daysElapsed;
+  return {suspended:true,days:daysRemaining,reason:`${label} loss — ${daysRemaining} day${daysRemaining===1?'':'s'} remaining in mandatory ${windowDays}-day suspension (OSAC 92:10-5-12)`};
 }
 
 /* ===== ADMIN VERIFICATION DASHBOARD ===== */
@@ -8543,8 +8550,8 @@ function openPostEventResult(eid){
       const[winner,method]=sel.split('_');
       if(f.f1&&f.f2){
         const loser=winner===f.f1?f.f2:winner===f.f2?f.f1:null;
-        if(method==='tko'&&loser){state.users[loser]={...state.users[loser],lastFightResult:'tko_loss'};suspensions.push(state.users[loser]?.name+' — 30-day TKO suspension');}
-        if(method==='ko'&&loser){state.users[loser]={...state.users[loser],lastFightResult:'ko_loss'};suspensions.push(state.users[loser]?.name+' — 45-day KO suspension');}
+        if(method==='tko'&&loser){state.users[loser]={...state.users[loser],lastFightResult:'tko_loss',lastFightResultDate:Date.now()};suspensions.push(state.users[loser]?.name+' — 30-day TKO suspension');}
+        if(method==='ko'&&loser){state.users[loser]={...state.users[loser],lastFightResult:'ko_loss',lastFightResultDate:Date.now()};suspensions.push(state.users[loser]?.name+' — 45-day KO suspension');}
         if(winner&&state.users[winner])state.users[winner].record.w=(state.users[winner].record.w||0)+1;
         if(loser&&state.users[loser])state.users[loser].record.l=(state.users[loser].record.l||0)+1;
       }
