@@ -852,7 +852,7 @@ function closeProfileMenu(){const m=document.getElementById('ruProfileMenu');if(
 function avatarHtml(prof, name, size){
   size=size||38;
   const url=prof&&prof.avatar_url;
-  const label=initials(name||escapeHtml((prof&&(prof.display_name||prof.username))||'?'));
+  const label=initials(name||(prof&&(prof.display_name||prof.username))||'?');
   if(url){
     return `<img src="${url}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="lazy">`;
   }
@@ -7140,7 +7140,22 @@ function timeAgo(iso){
   if(s<86400)return Math.floor(s/3600)+'h';
   return Math.floor(s/86400)+'d';
 }
-function initials(name){return (name||'?').trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();}
+// Callers of initials() almost always pass a name that has already been run
+// through escapeHtml() (since it's usually pulled from a template string that
+// needs to be safe elsewhere too). Decode those entities first so a name like
+// "<Bob>" (escaped to "&lt;Bob&gt;") still yields "B" instead of "&", then
+// re-escape the short result before returning it so callers can keep
+// interpolating it directly into HTML.
+function initials(name){
+  let s=(name||'?');
+  // Multi-char entities must be decoded before &amp; or "&amp;lt;" would
+  // double-decode into "<" instead of staying as the literal text "&lt;".
+  s=s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&');
+  s=s.trim();
+  const parts=s?s.split(/\s+/):[];
+  const label=parts.map(p=>p[0]||'').join('').slice(0,2).toUpperCase()||'?';
+  return escapeHtml(label);
+}
 
 // Load the shared feed from the database (newest first). We fetch reels first,
 // then look up author names in a second query. This avoids depending on a
