@@ -3765,7 +3765,8 @@ function renderOfficialProfile(u){
   const basePayRate=OFFICIAL_PAY[mySubRole]||100;
   const payLabel=mySubRole==='Referee'?'per bout worked':'per event (full card)';
   const upcomingCards=state.events.filter(e=>Object.values(e.officials).includes(u.id));
-  const safesportExpiry=u.safesportExpiry||'Dec 2025'; // demo value
+  const safesportExpiry=u.safesportExpiry||'Dec 2025'; // demo display value only — actual status computed below
+  const safesport=checkSafeSportStatus(u.id);
   return `
   <div class="profile-hero"><div class="ph-bg"></div><div class="ph-pattern"></div>
     <div class="ph-content">
@@ -3774,6 +3775,15 @@ function renderOfficialProfile(u){
       <div class="ph-meta"><span><strong>${mySubRole}</strong></span><span style="color:var(--dark5)">·</span><span>${u.years} yrs</span><span style="color:var(--dark5)">·</span><span>Licensed ✓</span></div>
     </div>
   </div>
+  ${safesport.status==='expired'||safesport.status==='expiring_soon'?`
+  <div style="background:rgba(${safesport.status==='expired'?'232,37,26':'245,166,35'},.12);border:1px solid rgba(${safesport.status==='expired'?'232,37,26':'245,166,35'},.4);border-radius:var(--r);margin:0 18px 0;padding:12px 14px;display:flex;align-items:flex-start;gap:10px">
+    <span style="font-size:18px;flex-shrink:0">${safesport.status==='expired'?'⛔':'⚠'}</span>
+    <div>
+      <div style="font-size:12px;font-weight:700;color:${safesport.status==='expired'?'var(--red)':'var(--gold)'};margin-bottom:3px">${safesport.status==='expired'?'SafeSport Certificate Expired':'SafeSport Certificate Expiring Soon'}</div>
+      <div style="font-size:11px;color:var(--lighter);line-height:1.5">${safesport.status==='expired'?'Your certificate expired '+Math.abs(safesport.daysUntilExpiry)+' day'+(Math.abs(safesport.daysUntilExpiry)===1?'':'s')+' ago.':'Your certificate expires in '+safesport.daysUntilExpiry+' day'+(safesport.daysUntilExpiry===1?'':'s')+'.'}</div>
+      <div style="font-size:10px;color:var(--mid);margin-top:4px">${safesport.status==='expired'?'You are blocked from claiming new official assignments involving minors until renewed.':'Renew now to avoid being blocked from assignments involving minors.'} Renew at athletesafety.org.</div>
+    </div>
+  </div>`:''}
   <div class="sponsor-stat-grid" style="padding-top:14px">
     <div class="sponsor-stat"><div class="sponsor-stat-l">Role</div><div class="sponsor-stat-v" style="font-size:18px">${mySubRole}</div></div>
     <div class="sponsor-stat"><div class="sponsor-stat-l">Base rate</div><div class="sponsor-stat-v">$${basePayRate}</div><div class="sponsor-stat-trend">${payLabel}</div></div>
@@ -3796,7 +3806,7 @@ function renderOfficialProfile(u){
     <div class="bd-row">
       <div class="bd-l">SafeSport Certificate</div>
       <div class="bd-r" style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
-        <span class="bd-r pos">✓ Current</span>
+        <span class="bd-r ${safesport.status==='expired'?'neg':safesport.status==='expiring_soon'?'':'pos'}" style="${safesport.status==='expiring_soon'?'color:var(--gold)':''}">${safesport.status==='expired'?'✕ Expired':safesport.status==='expiring_soon'?'⚠ Expiring soon':'✓ Current'}</span>
         <span style="font-size:10px;color:var(--mid)">Expires ${safesportExpiry} · Renew at athletesafety.org</span>
       </div>
     </div>
@@ -4914,6 +4924,10 @@ function claimFightSlot(eid,fid){
 
 function claimOfficialSlot(eid,roleName){
   if(!requireVerified('claim_official'))return;
+  // Block on an expired SafeSport certificate — officials must stay current to work bouts involving minors.
+  const claimantId=ROLE_PROFILES[state.currentRole]?.userId;
+  const safesport=checkSafeSportStatus(claimantId);
+  if(safesport.status==='expired'){alert('Cannot accept this assignment.\n\nYour SafeSport certificate expired '+Math.abs(safesport.daysUntilExpiry)+' day'+(Math.abs(safesport.daysUntilExpiry)===1?'':'s')+' ago. Officials must hold a current SafeSport certificate to work bouts involving minors. Renew at athletesafety.org, then contact RoundUp admin to confirm your status.');return;}
   if(!confirm('Accept this assignment? You will be confirmed on the card.'))return;
   const e=state.events.find(x=>x.id===eid);
   if(!e)return;
@@ -5379,9 +5393,11 @@ function openOfficialsMarketplace(eid){
         <div style="font-size:10px;color:var(--mid);letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">${roleName}</div>
         ${roster.map(o=>{
           const booked=alreadyBooked.has(o.id);
+          const oSafesport=checkSafeSportStatus(o.id);
+          const safesportFlag=oSafesport.status==='expired'?' <span style="color:var(--red);font-weight:600">✕ Expired</span>':oSafesport.status==='expiring_soon'?' <span style="color:var(--gold);font-weight:600">⚠ Expiring soon</span>':'';
           return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:${booked?'rgba(29,184,122,.06)':'var(--dark2)'};border:1px solid ${booked?'rgba(29,184,122,.2)':'var(--dark4)'};border-radius:var(--r);margin-bottom:5px">
             <div style="width:36px;height:36px;border-radius:50%;background:${avatarBg(o.color)};color:${avatarColor(o.color)};display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:13px">${o.avatar}</div>
-            <div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--white)">${o.name}</div><div style="font-size:10px;color:var(--mid)">${o.years} yrs · ${o.eventsWorked||0} events · SafeSport ${o.safesportExpiry||'?'}</div></div>
+            <div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--white)">${o.name}</div><div style="font-size:10px;color:var(--mid)">${o.years} yrs · ${o.eventsWorked||0} events · SafeSport ${o.safesportExpiry||'?'}${safesportFlag}</div></div>
             <div style="text-align:right">${booked?'<div style="font-size:10px;color:var(--green);font-weight:600">✓ Booked</div>':'<div style="font-size:13px;font-weight:600;color:var(--gold)">$'+o.bookingRate+'</div>'}<br>${booked?'':'<button onclick="bookOfficial(\''+eid+'\',\''+o.id+'\',\''+roleName+'\','+o.bookingRate+')" style="background:var(--blue);color:#fff;border:none;padding:5px 10px;border-radius:8px;font-size:10px;font-weight:600;cursor:pointer;font-family:\'DM Sans\',sans-serif">Book</button>'}</div>
           </div>`;}).join('')}
       </div>`).join('')}
@@ -5392,6 +5408,9 @@ function bookOfficial(eid, officialId, role, rate){
   if(!state.officialBookings)state.officialBookings=[];
   if(state.officialBookings.find(ob=>ob.eventId===eid&&ob.officialId===officialId)){alert('This official is already booked.');return;}
   const official=state.users[officialId],e=state.events.find(x=>x.id===eid);
+  // Block booking an official whose SafeSport certificate has expired — required to work bouts involving minors.
+  const safesport=checkSafeSportStatus(officialId);
+  if(safesport.status==='expired'){alert('Cannot book '+(official?.name||'this official')+'.\n\nTheir SafeSport certificate expired '+Math.abs(safesport.daysUntilExpiry)+' day'+(Math.abs(safesport.daysUntilExpiry)===1?'':'s')+' ago. Officials must hold a current SafeSport certificate to work bouts involving minors. Ask them to renew at athletesafety.org before booking.');return;}
   if(!confirm('Book '+official?.name+' as '+role+' for '+e?.name+'?\n\nRate: $'+rate+' — held in escrow, paid at event completion.\n\nThis is your pre-event operating cost — not deducted from event revenue.'))return;
   state.officialBookings.push({id:'ob'+Date.now(),officialId,eventId:eid,role,rate,status:'confirmed',bookedAt:new Date().toLocaleDateString('en-US')});
   if(e){if(role==='Judge'){if(!e.officials.Judge1)e.officials.Judge1=officialId;else if(!e.officials.Judge2)e.officials.Judge2=officialId;else if(!e.officials.Judge3)e.officials.Judge3=officialId;}else{e.officials[role]=officialId;}}
@@ -5993,6 +6012,25 @@ function checkFighterSuspension(fighterId){
   if(daysElapsed>=windowDays)return {suspended:false};
   const daysRemaining=windowDays-daysElapsed;
   return {suspended:true,days:daysRemaining,reason:`${label} loss — ${daysRemaining} day${daysRemaining===1?'':'s'} remaining in mandatory ${windowDays}-day suspension (OSAC 92:10-5-12)`};
+}
+
+// Check a coach/official's SafeSport certificate against its expiry date.
+// This is a separate credential from the post-fight medical suspension window above —
+// SafeSport (athletesafety.org) certifies someone to work around minors, and is tracked
+// independently of USA Boxing registration. See VERIFICATION_DOCS.coach / official_*.
+// Returns {status:'valid'|'expiring_soon'|'expired'|'unknown', daysUntilExpiry}.
+// 'unknown' covers users with no safesportExpiry on file — fail open (don't block) rather
+// than treat missing/legacy demo data as an expired cert, same fail-open approach
+// checkFighterSuspension uses for records with no lastFightResultDate.
+function checkSafeSportStatus(userId){
+  const u=state.users[userId];
+  if(!u||!u.safesportExpiry)return {status:'unknown',daysUntilExpiry:null};
+  const expiry=new Date(u.safesportExpiry);
+  if(isNaN(expiry.getTime()))return {status:'unknown',daysUntilExpiry:null};
+  const daysUntilExpiry=Math.ceil((expiry.getTime()-Date.now())/86400000);
+  if(daysUntilExpiry<0)return {status:'expired',daysUntilExpiry};
+  if(daysUntilExpiry<=30)return {status:'expiring_soon',daysUntilExpiry};
+  return {status:'valid',daysUntilExpiry};
 }
 
 /* ===== ADMIN VERIFICATION DASHBOARD ===== */
