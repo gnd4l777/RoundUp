@@ -1010,6 +1010,18 @@ async function openRoleForm(roleId){
   }
   let m=document.getElementById('ruRoleForm');
   if(!m){m=document.createElement('div');m.id='ruRoleForm';m.className='modal-bg';m.onclick=function(e){if(e.target===m)m.style.display='none';};document.body.appendChild(m);}
+  // COPPA age gate (fighter only): collected as a one-off input OUTSIDE the
+  // generic `fields` array on purpose. Anything in `fields` gets copied verbatim
+  // into `info` in saveRole() and persisted to the `role_info` column, which is
+  // publicly readable (no login required — confirmed via a direct REST query)
+  // and is also fetched into other users' browsers by loadDirectory() and
+  // loadViewProfile() for the public directory/profile-view features. Age is
+  // used only to gate signup in saveRole() and is never written anywhere.
+  const ageGateHtml=roleId==='fighter'?`
+    <label style="font-size:12px;color:var(--mid);display:block;margin-top:10px">Age <span style="color:var(--red)">*</span></label>
+    <input id="rf_age_gate" type="number" style="width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:'DM Sans',sans-serif;margin-top:5px;box-sizing:border-box">
+    <div style="font-size:10px;color:var(--mid);margin-top:4px">Used only to confirm you meet RoundUp's minimum age requirement (COPPA). Not saved to your profile.</div>
+  `:'';
   const fieldHtml=fields.map(f=>{
     const val=(info[f.k]!=null?info[f.k]:'');
     const reqMark=f.req?' <span style="color:var(--red)">*</span>':'';
@@ -1036,6 +1048,7 @@ async function openRoleForm(roleId){
       <div class="modal-handle"></div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white)">List as ${ROLE_LABELS[roleId]}</div>
       <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">⏳ Self-listed for early access — not verified by RoundUp. You'll submit real credentials when events launch.</div>
+      ${ageGateHtml}
       ${fieldHtml}
       <div id="rfMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
       <button id="rfSaveBtn" onclick="saveRole('${roleId}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">Save</button>
@@ -1057,6 +1070,25 @@ async function saveRole(roleId){
     const v=el?el.value.trim():'';
     if(f.req&&!v){msg.textContent='Please fill in: '+f.label.replace(/<.*?>/g,'');return;}
     if(v)info[f.k]=v;
+  }
+  // COPPA age gate — fighter listings require an age check before saving.
+  // checkAgeGate() blocks under-13 outright and requires a guardian-consent
+  // confirm for 13-17; a false return means it already alerted/confirmed-out,
+  // so stop the signup cold rather than let it continue to the save below.
+  // Deliberately NOT persisted: `info` becomes the `role_info` column, which
+  // is publicly readable with no login (confirmed via direct REST query) and
+  // is also fetched into other users' browsers by loadDirectory() and
+  // loadViewProfile() for the directory/profile-view features. Storing an
+  // exact age — or worse, an isMinor:true flag that could be used to
+  // enumerate every minor on the platform — in a public field is not
+  // acceptable, so the age check happens here purely as a gate and nothing
+  // age-related is written to the database at all.
+  if(roleId==='fighter'){
+    const ageEl=document.getElementById('rf_age_gate');
+    const ageVal=ageEl?ageEl.value.trim():'';
+    if(!ageVal){msg.textContent='Please fill in: Age';return;}
+    const gate=checkAgeGate(ageVal);
+    if(!gate)return;
   }
   btn.disabled=true;btn.textContent='Saving…';msg.textContent='';
   try{
