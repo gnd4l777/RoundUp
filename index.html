@@ -24,7 +24,7 @@
   --red:#E8251A;--red-dim:#B01D14;
   --gold:#F5A623;--gold-dim:#C4841A;
   --dark:#0D0D0D;--dark2:#161616;--dark3:#1F1F1F;--dark4:#2A2A2A;--dark5:#353535;
-  --mid:#555;--light:#A8A8A8;--lighter:#D0D0D0;--white:#F5F4F0;
+  --mid:#6B6B6B;--light:#A8A8A8;--lighter:#D0D0D0;--white:#F5F4F0;
   --green:#1DB87A;--blue:#2A7FE8;--purple:#7F77DD;
   --r:14px;--r-sm:8px;--r-lg:20px;
 }
@@ -35,6 +35,13 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 
 #app{position:fixed;inset:0;background:var(--dark);display:flex;flex-direction:column;max-width:480px;margin:0 auto;box-shadow:0 0 80px rgba(0,0,0,.5);}
 .screen-wrap{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;}
+
+/* Tap feedback: a subtle press-state so it's always clear something responded
+   to a tap. Targeted at [onclick] rather than one class at a time, since most
+   interactive rows/cards/buttons across the app use inline onclick handlers
+   rather than a single shared component class. Opacity-only (no transform) so
+   it can't shift layout or clip inside scroll rows. */
+button:active,[onclick]:active{opacity:.7;}
 
 /* Desktop / large landscape: centered phone-style frame — ONLY when the screen
    is both wide AND tall enough to show it nicely. The min-height guard stops a
@@ -74,8 +81,10 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 /* ===================== AUTH GATE styling ===================== */
 #ruAuth{position:fixed;inset:0;z-index:5000;background:radial-gradient(circle at 50% 0%,#1a1a1a 0%,#000 70%);
   display:flex;align-items:center;justify-content:center;padding:24px;}
+#ruAuth::before{content:'';position:absolute;inset:0;opacity:.05;pointer-events:none;
+  background-image:repeating-linear-gradient(45deg,var(--red) 0,var(--red) 1px,transparent 0,transparent 50%);background-size:14px 14px;}
 #ruAuth.ru-hidden{display:none;}
-.ru-auth-card{width:100%;max-width:360px;background:var(--dark2);border:1px solid var(--dark3);border-radius:18px;padding:30px 24px;box-shadow:0 24px 80px rgba(0,0,0,.6);}
+.ru-auth-card{position:relative;z-index:1;width:100%;max-width:360px;background:var(--dark2);border:1px solid var(--dark3);border-radius:18px;padding:30px 24px;box-shadow:0 24px 80px rgba(0,0,0,.6);}
 .ru-auth-wordmark{font-family:'Bebas Neue',sans-serif;font-size:40px;letter-spacing:4px;color:var(--red);text-align:center;line-height:1;}
 .ru-auth-tag{text-align:center;color:var(--light);font-size:12px;letter-spacing:1px;margin:6px 0 22px;text-transform:uppercase;}
 .ru-auth-input{width:100%;box-sizing:border-box;background:var(--dark);border:1px solid var(--dark4);border-radius:10px;
@@ -106,9 +115,9 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 .nav-wordmark{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:2px;color:var(--red);}
 .nav-title{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1.5px;color:var(--white);}
 .nav-icons{display:flex;gap:8px;align-items:center;}
-.nav-icon{width:34px;height:34px;border-radius:50%;background:var(--dark3);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;position:relative;border:none;color:var(--lighter);}
+.nav-icon{width:38px;height:38px;border-radius:50%;background:var(--dark3);display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;position:relative;border:none;color:var(--lighter);}
 .nav-dot{position:absolute;top:5px;right:5px;width:7px;height:7px;background:var(--red);border-radius:50%;border:2px solid var(--dark);}
-.back-btn{font-size:24px;color:var(--red);cursor:pointer;line-height:1;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border:none;background:none;}
+.back-btn{font-size:24px;color:var(--red);cursor:pointer;line-height:1;width:38px;height:38px;display:flex;align-items:center;justify-content:center;border:none;background:none;}
 
 .inner-scroll{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
 .inner-scroll::-webkit-scrollbar{display:none;}
@@ -301,10 +310,10 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 .prop-btn.counter{background:var(--dark4);color:var(--lighter);}
 
 .composer{background:var(--dark2);border-top:1px solid var(--dark3);padding:10px 14px;display:flex;align-items:center;gap:8px;flex-shrink:0;}
-.comp-attach{width:34px;height:34px;border-radius:50%;background:var(--dark3);display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;flex-shrink:0;color:var(--lighter);border:none;}
+.comp-attach{width:38px;height:38px;border-radius:50%;background:var(--dark3);display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;flex-shrink:0;color:var(--lighter);border:none;}
 .comp-input{flex:1;background:var(--dark3);border:1px solid var(--dark4);border-radius:20px;padding:9px 16px;color:var(--white);font-size:13px;font-family:'DM Sans',sans-serif;outline:none;}
 .comp-input::placeholder{color:var(--mid);}
-.comp-send{width:34px;height:34px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;color:#fff;font-size:16px;border:none;}
+.comp-send{width:38px;height:38px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;color:#fff;font-size:16px;border:none;}
 .preset-bar{padding:8px 14px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;background:var(--dark);border-top:1px solid var(--dark3);flex-shrink:0;}
 .preset-bar::-webkit-scrollbar{display:none;}
 .preset-chip{background:var(--dark3);border:1px solid var(--dark4);color:var(--lighter);font-size:11px;padding:6px 12px;border-radius:14px;white-space:nowrap;cursor:pointer;font-family:'DM Sans',sans-serif;}
@@ -340,7 +349,10 @@ body{font-family:'DM Sans',sans-serif;color:var(--white);overscroll-behavior:non
 .event-meta-row strong{color:var(--lighter);}
 .draft-badge{position:absolute;top:12px;right:12px;background:var(--gold);color:#0D0D0D;font-size:9px;font-weight:700;padding:3px 8px;border-radius:8px;letter-spacing:1px;}
 
-.empty{padding:40px 18px;text-align:center;}
+.empty{position:relative;padding:40px 18px;text-align:center;overflow:hidden;}
+.empty::before{content:'';position:absolute;inset:0;opacity:.05;pointer-events:none;z-index:0;
+  background-image:repeating-linear-gradient(45deg,var(--gold) 0,var(--gold) 1px,transparent 0,transparent 50%);background-size:14px 14px;}
+.empty>*{position:relative;z-index:1;}
 .empty-icon{font-size:48px;margin-bottom:14px;}
 .empty-title{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px;margin-bottom:6px;}
 .empty-text{font-size:13px;color:var(--mid);line-height:1.5;max-width:280px;margin:0 auto 18px;}
@@ -2591,12 +2603,15 @@ function renderEventsComingSoon(){
   return `
     <div class="nav-bar"><div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="openNotifications()">🔔<div class="nav-dot" style="display:none"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div></div>
     <div class="inner-scroll">
-      <div style="padding:24px 18px 8px;text-align:center">
-        <div style="font-size:40px;margin-bottom:8px">🥊</div>
-        <div style="font-size:11px;color:var(--gold);letter-spacing:1.5px;text-transform:uppercase;font-weight:600;margin-bottom:2px">Bouts · Tournaments · Community Events</div>
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:30px;letter-spacing:1px;color:var(--white);line-height:1">Events<br>Coming Soon</div>
-        <div style="font-size:13px;color:var(--light);line-height:1.6;margin-top:12px;max-width:340px;margin-left:auto;margin-right:auto">
-          RoundUp is building Tulsa's home for events — combat sports fight cards first, with tournaments, showcases, and other community events on the way. Right now it's a place for the community to post, connect, and follow each other. Live events are on the way — we're building them carefully and working toward USA Boxing LBC #27 sanctioning for combat cards so they're done right.
+      <div style="position:relative;overflow:hidden;padding:24px 18px 8px;text-align:center">
+        <div class="ph-pattern"></div>
+        <div style="position:relative;z-index:1">
+          <div style="font-size:40px;margin-bottom:8px">🥊</div>
+          <div style="font-size:11px;color:var(--gold);letter-spacing:1.5px;text-transform:uppercase;font-weight:600;margin-bottom:2px">Bouts · Tournaments · Community Events</div>
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:30px;letter-spacing:1px;color:var(--white);line-height:1">Events<br>Coming Soon</div>
+          <div style="font-size:13px;color:var(--light);line-height:1.6;margin-top:12px;max-width:340px;margin-left:auto;margin-right:auto">
+            RoundUp is building Tulsa's home for events — combat sports fight cards first, with tournaments, showcases, and other community events on the way. Right now it's a place for the community to post, connect, and follow each other. Live events are on the way — we're building them carefully and working toward USA Boxing LBC #27 sanctioning for combat cards so they're done right.
+          </div>
         </div>
       </div>
 
@@ -6954,7 +6969,7 @@ function renderFanChat(role){
       </div>
       <div style="display:flex;gap:8px">
         <input class="comp-input" id="fanMsgInput" placeholder="Chat with other fans..." style="flex:1;background:var(--dark3);border:1px solid var(--dark4);border-radius:20px;padding:9px 16px;color:var(--white);font-size:13px;outline:none">
-        <button class="comp-send" onclick="sendFanMessage()" style="width:34px;height:34px;border-radius:50%;background:var(--blue);border:none;color:#fff;cursor:pointer">↑</button>
+        <button class="comp-send" onclick="sendFanMessage()" style="width:38px;height:38px;border-radius:50%;background:var(--blue);border:none;color:#fff;cursor:pointer">↑</button>
       </div>
     </div>
     <div class="pb-safe"></div>
@@ -9010,6 +9025,12 @@ render();
   } // end startGate
 })();
 
+
+/* Enables CSS :active press-states on iOS Safari/WebKit, which otherwise only
+   fires :active when a touch listener exists somewhere in the ancestor chain.
+   No-op listener — just makes the tap-feedback styles above actually show up
+   on iPhones/iPads instead of being silently ignored. */
+document.addEventListener('touchstart',function(){},{passive:true});
 
 /* PWA: register service worker so RoundUp can be installed to a home screen.
    Skips preview/local-file contexts (where the companion files aren't hosted)
