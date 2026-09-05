@@ -825,7 +825,7 @@ function openProfileMenu(){
     <div class="modal" style="text-align:left">
       <div class="modal-handle"></div>
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
-        ${window.ruAvatarUrl?`<img src="${window.ruAvatarUrl}" style="width:46px;height:46px;border-radius:50%;object-fit:cover">`:`<div style="width:46px;height:46px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:18px">${(name[0]||'C').toUpperCase()}</div>`}
+        ${window.ruAvatarUrl?`<img src="${safeUrl(window.ruAvatarUrl)}" style="width:46px;height:46px;border-radius:50%;object-fit:cover">`:`<div style="width:46px;height:46px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:18px">${(name[0]||'C').toUpperCase()}</div>`}
         <div style="min-width:0">
           <div style="font-size:15px;font-weight:700;color:var(--white)">${name}</div>
           <div style="font-size:11px;color:var(--mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${email}</div>
@@ -852,9 +852,9 @@ function closeProfileMenu(){const m=document.getElementById('ruProfileMenu');if(
 function avatarHtml(prof, name, size){
   size=size||38;
   const url=prof&&prof.avatar_url;
-  const label=initials(name||escapeHtml((prof&&(prof.display_name||prof.username))||'?'));
+  const label=initials(name||(prof&&(prof.display_name||prof.username))||'?');
   if(url){
-    return `<img src="${url}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="lazy">`;
+    return `<img src="${safeUrl(url)}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="lazy">`;
   }
   return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:${Math.round(size*0.36)}px;flex-shrink:0">${label}</div>`;
 }
@@ -871,7 +871,7 @@ function openEditProfile(){
       <div class="modal-handle"></div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white);margin-bottom:14px">Edit Profile</div>
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
-        <div id="epAvatarPreview">${cur?`<img src="${cur}" style="width:64px;height:64px;border-radius:50%;object-fit:cover">`:`<div style="width:64px;height:64px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:24px">${initials(name)}</div>`}</div>
+        <div id="epAvatarPreview">${cur?`<img src="${safeUrl(cur)}" style="width:64px;height:64px;border-radius:50%;object-fit:cover">`:`<div style="width:64px;height:64px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:24px">${initials(name)}</div>`}</div>
         <div style="flex:1">
           <label style="font-size:12px;color:var(--mid)">Profile photo</label>
           <input id="epPhoto" type="file" accept="image/*" style="display:block;margin-top:6px;color:var(--lighter);font-size:12px;width:100%">
@@ -1115,7 +1115,7 @@ async function openGymForm(gymId){
       <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">🏋 This is your gym's page — you own and control it. Self-listed for early access; not verified by RoundUp.</div>
 
       <div style="display:flex;align-items:center;gap:14px;margin-top:6px">
-        <div id="gfAvatarPreview">${gym.avatar_url?`<img src="${gym.avatar_url}" style="width:64px;height:64px;border-radius:14px;object-fit:cover">`:`<div style="width:64px;height:64px;border-radius:14px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:28px">🏋</div>`}</div>
+        <div id="gfAvatarPreview">${gym.avatar_url?`<img src="${safeUrl(gym.avatar_url)}" style="width:64px;height:64px;border-radius:14px;object-fit:cover">`:`<div style="width:64px;height:64px;border-radius:14px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:28px">🏋</div>`}</div>
         <div style="flex:1"><label style="${lbl};margin-top:0">Gym photo</label><input id="gf_photo" type="file" accept="image/*" style="display:block;margin-top:6px;color:var(--lighter);font-size:12px;width:100%"></div>
       </div>
 
@@ -1372,7 +1372,7 @@ function renderGymPage(){
     <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Gym</div><div style="width:34px"></div></div>
     <div class="inner-scroll">
       <div style="padding:24px 18px 16px;text-align:center;background:linear-gradient(180deg,rgba(245,166,35,.08),transparent)">
-        ${g.avatar_url?`<img src="${g.avatar_url}" style="width:84px;height:84px;border-radius:18px;object-fit:cover;margin:0 auto 12px;display:block">`:`<div style="width:84px;height:84px;border-radius:18px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:38px;margin:0 auto 12px">🏋</div>`}
+        ${g.avatar_url?`<img src="${safeUrl(g.avatar_url)}" style="width:84px;height:84px;border-radius:18px;object-fit:cover;margin:0 auto 12px;display:block">`:`<div style="width:84px;height:84px;border-radius:18px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:38px;margin:0 auto 12px">🏋</div>`}
         <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;color:var(--white);line-height:1">${escapeHtml(g.name)}</div>
         <div style="font-size:13px;color:var(--lighter);margin-top:4px">📍 ${escapeHtml(g.location||'')}</div>
         ${g.sports?`<div style="margin-top:6px"><span style="display:inline-block;background:var(--dark3);color:var(--lighter);font-size:10px;padding:3px 10px;border-radius:10px">${escapeHtml(g.sports)}</span></div>`:''}
@@ -3926,8 +3926,8 @@ function renderProfileDetail(){
         : `<div style="padding:0 18px 18px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px">
             ${reels.map(r=>{
               const img=r.media_url?(r.media_type==='video'
-                ? `<video src="${r.media_url}#t=0.1" muted playsinline preload="metadata" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#000"></video><div style="position:absolute;top:4px;right:4px;font-size:11px">▶️</div>`
-                : `<img src="${r.media_url}" style="width:100%;aspect-ratio:1;object-fit:cover;display:block" loading="lazy">`):`<div style="width:100%;aspect-ratio:1;background:var(--dark3);display:flex;align-items:center;justify-content:center;font-size:18px">🥊</div>`;
+                ? `<video src="${safeUrl(r.media_url)}#t=0.1" muted playsinline preload="metadata" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#000"></video><div style="position:absolute;top:4px;right:4px;font-size:11px">▶️</div>`
+                : `<img src="${safeUrl(r.media_url)}" style="width:100%;aspect-ratio:1;object-fit:cover;display:block" loading="lazy">`):`<div style="width:100%;aspect-ratio:1;background:var(--dark3);display:flex;align-items:center;justify-content:center;font-size:18px">🥊</div>`;
               return `<div onclick="setTab('reels')" style="position:relative;border-radius:6px;overflow:hidden;cursor:pointer;background:var(--dark3)">${img}</div>`;
             }).join('')}
           </div>`}
@@ -4540,7 +4540,7 @@ function renderConversation(){
             if(rm){
               const reel=(state.dmReelCards||{})[rm[1]];
               const cap=reel?escapeHtml(reel.caption||''):'';
-              const img=reel&&reel.media_url?`<img src="${reel.media_url}" style="width:100%;border-radius:10px 10px 0 0;display:block" loading="lazy">`:'';
+              const img=reel&&reel.media_url?`<img src="${safeUrl(reel.media_url)}" style="width:100%;border-radius:10px 10px 0 0;display:block" loading="lazy">`:'';
               const inner=reel
                 ? `${img}<div style="padding:8px 10px"><div style="font-size:10px;color:var(--mid);margin-bottom:2px">📨 Shared reel</div><div style="font-size:12px;color:var(--white)">${cap||'(no caption)'}</div></div>`
                 : `<div style="padding:10px 12px;font-size:12px;color:var(--mid)">📨 Shared reel (tap to view)</div>`;
@@ -6240,8 +6240,8 @@ function renderCreatorHome(){
           const prof=r.profiles||{};
           const nm=escapeHtml((prof.display_name||prof.username)||'Creator');
           const img=r.media_url?(r.media_type==='video'
-            ? `<video src="${r.media_url}#t=0.1" muted playsinline preload="metadata" style="width:100%;height:96px;object-fit:cover;display:block;background:#000"></video>`
-            : `<img src="${r.media_url}" style="width:100%;height:96px;object-fit:cover;display:block" loading="lazy">`):`<div style="width:100%;height:96px;background:linear-gradient(135deg,#1a0000,#0d1a2d);display:flex;align-items:center;justify-content:center;font-size:24px">🥊</div>`;
+            ? `<video src="${safeUrl(r.media_url)}#t=0.1" muted playsinline preload="metadata" style="width:100%;height:96px;object-fit:cover;display:block;background:#000"></video>`
+            : `<img src="${safeUrl(r.media_url)}" style="width:100%;height:96px;object-fit:cover;display:block" loading="lazy">`):`<div style="width:100%;height:96px;background:linear-gradient(135deg,#1a0000,#0d1a2d);display:flex;align-items:center;justify-content:center;font-size:24px">🥊</div>`;
           return `
           <div onclick="setTab('reels')" style="min-width:150px;max-width:150px;flex-shrink:0;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);overflow:hidden;cursor:pointer">
             ${img}
@@ -6285,7 +6285,7 @@ function renderCreatorHome(){
       let cards='';
       gyms.forEach(g=>{
         cards+=`<div onclick="openGymPage('${g.id}')" style="min-width:130px;max-width:130px;flex-shrink:0;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:14px 10px;text-align:center;cursor:pointer">
-          <div style="width:48px;height:48px;border-radius:12px;margin:0 auto 8px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:22px">${g.avatar_url?`<img src="${g.avatar_url}" style="width:48px;height:48px;border-radius:12px;object-fit:cover">`:'🏋'}</div>
+          <div style="width:48px;height:48px;border-radius:12px;margin:0 auto 8px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:22px">${g.avatar_url?`<img src="${safeUrl(g.avatar_url)}" style="width:48px;height:48px;border-radius:12px;object-fit:cover">`:'🏋'}</div>
           <div style="font-size:12px;font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(g.name)}</div>
           <div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.5px">Gym</div>
         </div>`;
@@ -7140,7 +7140,22 @@ function timeAgo(iso){
   if(s<86400)return Math.floor(s/3600)+'h';
   return Math.floor(s/86400)+'d';
 }
-function initials(name){return (name||'?').trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();}
+// Callers of initials() almost always pass a name that has already been run
+// through escapeHtml() (since it's usually pulled from a template string that
+// needs to be safe elsewhere too). Decode those entities first so a name like
+// "<Bob>" (escaped to "&lt;Bob&gt;") still yields "B" instead of "&", then
+// re-escape the short result before returning it so callers can keep
+// interpolating it directly into HTML.
+function initials(name){
+  let s=(name||'?');
+  // Multi-char entities must be decoded before &amp; or "&amp;lt;" would
+  // double-decode into "<" instead of staying as the literal text "&lt;".
+  s=s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&');
+  s=s.trim();
+  const parts=s?s.split(/\s+/):[];
+  const label=parts.map(p=>p[0]||'').join('').slice(0,2).toUpperCase()||'?';
+  return escapeHtml(label);
+}
 
 // Load the shared feed from the database (newest first). We fetch reels first,
 // then look up author names in a second query. This avoids depending on a
@@ -7452,10 +7467,10 @@ function renderReelsFeed(role){
             </div>
             ${r.media_url?(r.media_type==='video'
               ? `<div style="position:relative;margin-bottom:10px">
-                  <video id="vid_${r.id}" src="${r.media_url}" muted autoplay loop playsinline preload="metadata" style="width:100%;border-radius:var(--r);display:block;background:#000"></video>
+                  <video id="vid_${r.id}" src="${safeUrl(r.media_url)}" muted autoplay loop playsinline preload="metadata" style="width:100%;border-radius:var(--r);display:block;background:#000"></video>
                   <button onclick="toggleReelMute('${r.id}',event)" id="mute_${r.id}" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.65);color:#fff;border:none;width:38px;height:38px;border-radius:50%;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center">🔇</button>
                 </div>`
-              : `<img src="${r.media_url}" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block" loading="lazy">`):''}
+              : `<img src="${safeUrl(r.media_url)}" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block" loading="lazy">`):''}
             ${r.caption?`<div style="font-size:13px;color:var(--lighter);line-height:1.5;margin-bottom:10px">${escapeHtml(r.caption)}</div>`:''}
             <div style="display:flex;gap:16px;align-items:center">
               <button id="like_${r.id}" onclick="toggleLike('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:${r.likedByMe?'var(--red)':'var(--light)'};font-family:'DM Sans',sans-serif">${r.likedByMe?'❤️':'🤍'} ${r.likeCount||0}</button>
@@ -7529,7 +7544,17 @@ function compressImage(file, maxDim, quality){
   });
 }
 
-function escapeHtml(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function escapeHtml(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+
+// For URLs placed inside src="..." attributes (profile avatar_url, reel
+// media_url — both user-controlled). escapeHtml alone stops a value from
+// breaking out of the quoted attribute; this additionally blocks javascript:
+// URIs, which quote-escaping doesn't address.
+function safeUrl(u){
+  const s=(u||'').toString().trim();
+  if(/^javascript:/i.test(s))return '';
+  return escapeHtml(s);
+}
 
 function playReel(rid){
   const r=SAMPLE_REELS.find(x=>x.id===rid)||(state.myReels||[]).find(x=>x.id===rid);
