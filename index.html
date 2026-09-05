@@ -960,6 +960,7 @@ function roleFields(roleId){
   switch(roleId){
     case 'fighter': return [
       {k:'sport',label:'Combat sport',type:'select',opts:COMBAT_SPORTS,req:true},
+      {k:'age',label:'Age',type:'number',req:true},
       {k:'height',label:'Height (e.g. 5\'9")',type:'text',req:true},
       {k:'weight',label:'Weight (lbs)',type:'number',req:true},
       {k:'gym',label:'Gym',type:'gym',req:false},
@@ -1056,6 +1057,21 @@ async function saveRole(roleId){
     const v=el?el.value.trim():'';
     if(f.req&&!v){msg.textContent='Please fill in: '+f.label.replace(/<.*?>/g,'');return;}
     if(v)info[f.k]=v;
+  }
+  // COPPA age gate — fighter listings require an age check before saving.
+  // Under 13 is blocked outright; 13-17 requires a guardian-consent confirm.
+  // checkAgeGate() shows its own alert/confirm, so a false return here must
+  // stop the signup cold rather than let it continue to the save below.
+  if(roleId==='fighter'){
+    const gate=checkAgeGate(info.age);
+    if(!gate)return;
+    info.isMinor=gate.minor;
+    info.age=gate.age;
+    if(state.users&&state.users.me){
+      state.users.me.isMinor=gate.minor;
+      state.users.me.age=gate.age;
+      saveState();
+    }
   }
   btn.disabled=true;btn.textContent='Saving…';msg.textContent='';
   try{
