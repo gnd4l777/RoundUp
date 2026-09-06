@@ -142,7 +142,10 @@ create table if not exists public.events_general (
   title text not null,
   description text,
   category text not null default 'other'
-    check (category in ('wedding','reunion','tournament','other')),
+    -- widened to match the "Social Events" copy already shipped in the Find tab
+    -- and Events Coming Soon screen (PR #5, #13), which explicitly promises
+    -- weddings, reunions, fundraisers, and brand showcases as event types.
+    check (category in ('wedding','reunion','tournament','fundraiser','showcase','other')),
   start_time timestamptz not null,
   end_time timestamptz,
   venue_name text,
