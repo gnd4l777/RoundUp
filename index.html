@@ -2613,8 +2613,8 @@ async function loadInbox(){
 // reunion/tournament/fundraiser/showcase/other list floated in the task,
 // since 'fundraiser' and 'showcase' aren't in the DB constraint and an insert
 // with either would be rejected once the migration is applied.
-const GENERAL_EVENT_CATEGORIES=[['wedding','Wedding'],['reunion','Reunion'],['tournament','Tournament'],['other','Other']];
-const GENERAL_EVENT_CATEGORY_LABELS={wedding:'Wedding',reunion:'Reunion',tournament:'Tournament',other:'Other'};
+const GENERAL_EVENT_CATEGORIES=[['wedding','Wedding'],['reunion','Reunion'],['tournament','Tournament'],['fundraiser','Fundraiser'],['showcase','Showcase'],['other','Other']];
+const GENERAL_EVENT_CATEGORY_LABELS={wedding:'Wedding',reunion:'Reunion',tournament:'Tournament',fundraiser:'Fundraiser',showcase:'Showcase',other:'Other'};
 
 function fmtEventDateTime(iso){
   const d=iso?new Date(iso):null;
