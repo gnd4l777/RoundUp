@@ -2838,6 +2838,10 @@ function parseEventDateLoose(str){
   if(monthIdx<0||day<1||day>31)return null;
   const year=m[3]?parseInt(m[3],10):now.getFullYear();
   let d=new Date(year,monthIdx,day);
+  // JS Date silently rolls invalid days into the next month (e.g. Feb 30 ->
+  // Mar 2). That's a bogus reading of the host's text, not a real date, so
+  // treat it the same as unparseable rather than filtering on a wrong month.
+  if(d.getMonth()!==monthIdx)return null;
   if(!m[3]){
     // No year in the text — if that reading is already >1 month in the past,
     // the host almost certainly meant next year, not last year.
@@ -2855,8 +2859,21 @@ function eventMatchesFilters(e,filt){
   if(filt.location){
     const q=filt.location.trim().toLowerCase();
     if(q){
-      const hay=((e.venue||'')+' '+(e.address||'')).toLowerCase();
-      if(!hay.includes(q))return false;
+      const addr=(e.address||'').trim().toLowerCase();
+      // Address is the only field that ever holds real city/state text — it's
+      // filled in from the accepting gym's location once a venue offer is
+      // accepted, but until then (and in most seed/demo events) it's just the
+      // literal placeholder 'TBD', and `venue` on its own is a bare venue name
+      // with no city/state in it. Enforcing a city/state filter against that
+      // would hide essentially every real open slot by default, so this only
+      // checks location once there's a genuine address to check it against —
+      // same "don't hide over missing data" approach as the date filter below.
+      if(addr&&addr!=='tbd'){
+        const venue=(e.venue||'').trim().toLowerCase();
+        const hay=(venue+' '+addr).trim();
+        const qWords=q.split(/[,\s]+/).filter(Boolean);
+        if(!qWords.some(w=>hay.includes(w)))return false;
+      }
     }
   }
   if(filt.when&&filt.when!=='all'){
@@ -8685,7 +8702,10 @@ function openFindBout(){
   if(!me)return;
   openActionModal('Find a Bout',`
     <div style="display:flex;flex-direction:column;gap:12px">
-      <div><div class="edit-label">Weight class</div><input class="edit-input" id="fb_weight" value="${me.weight||'Welterweight'}" placeholder="e.g. Welterweight"></div>
+      <div><div class="edit-label">Weight class</div><select class="edit-input" id="fb_weight">
+        <option value="">Any weight class</option>
+        ${getEventWeightClassOptions().map(w=>`<option value="${escapeHtml(w)}" ${(me.weight||'Welterweight')===w?'selected':''}>${escapeHtml(w)}</option>`).join('')}
+      </select></div>
       <div><div class="edit-label">Preferred date range</div><input class="edit-input" id="fb_date" placeholder="e.g. June 2025"></div>
       <div><div class="edit-label">Location preference</div><input class="edit-input" id="fb_loc" value="${me.location||'Tulsa, OK'}" placeholder="City, State"></div>
       <div><div class="edit-label">Message to matchmakers (optional)</div><input class="edit-input" id="fb_msg" placeholder="e.g. Looking for 4-round bout..."></div>
