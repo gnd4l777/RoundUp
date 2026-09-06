@@ -269,7 +269,7 @@ alter table public.gyms
   add column if not exists verified_venue boolean not null default false;
 
 -- ----------------------------------------------------------------------------
--- 5) Column-level privilege lockdown — REVIEWER FIX.
+-- 5) Column-level privilege lockdown — REVIEWER FIX, v2.
 --
 --    Confirmed problem: gyms already has a live owner-scoped UPDATE policy
 --    (index.html:1214, db.from('gyms').update(fields).eq('id',gymId), scoped
@@ -280,21 +280,73 @@ alter table public.gyms
 --    {"verified_venue": true} and self-award the certification badge, which
 --    defeats the entire point of an admin-set certification (index.html is
 --    full of "Self-listed — not verified by RoundUp" disclaimers this flag is
---    meant to eventually replace).
+--    meant to eventually replace). Same shape of problem applies to
+--    gym_members.member_role (added in section 1) via the live gym_members
+--    UPDATE policy — a member could self-promote to 'coach'.
 --
---    Same possible issue, unverified: gym_members.member_role (added in
---    section 1) might have the identical problem if the live gym_members
---    UPDATE policy lets a member update their own membership row — a member
---    could self-promote to 'coach', the exact field that will gate "this
---    coach's fighters" once built. There is no CREATE TABLE for gym_members
---    in this repo to check the live policy against, so this is fixed
---    defensively either way, since the fix pattern is identical and cheap.
+--    v1 of this fix used `revoke update (verified_venue) on public.gyms from
+--    authenticated, anon` (and the same shape for member_role). That is a
+--    NO-OP and does NOT fix the hole. Per Postgres's own REVOKE documentation:
+--    a column-level privilege only ever *restricts* access relative to
+--    whatever the broadest applicable grant already allows; it does not
+--    override a coexisting table-level grant of the same privilege. Supabase
+--    grants table-level UPDATE (and INSERT) on public.gyms and
+--    public.gym_members to `authenticated` by default, and that grant was
+--    never revoked by v1 — it was only ever narrowed at the column level,
+--    which had nothing to override. Proof this table-level grant is live and
+--    in active use: index.html:1214 (`db.from('gyms').update(fields)...`) and
+--    index.html:1330 (`db.from('gym_members').update({status:'approved'})`)
+--    both work today, and neither could work at all under a hypothetical
+--    "table-level UPDATE already revoked" world. So under v1, `revoke update
+--    (verified_venue) ...` and `revoke update (member_role) ...` left the
+--    table-level UPDATE grant fully intact, meaning verified_venue and
+--    member_role were STILL writable by anyone with an owner/member-scoped
+--    row via the ordinary table-level path — the self-certification and
+--    self-promotion hole was never actually closed.
 --
---    Fix pattern for both: REVOKE UPDATE on just the sensitive column (this
---    blocks it at the grant level regardless of what any row-level policy
---    otherwise allows — RLS alone cannot express column-level restriction),
---    plus a SECURITY DEFINER function that performs the actual authorized
---    write after its own explicit authority check.
+--    v1 also missed the INSERT path entirely: a user doesn't need UPDATE at
+--    all to set a privileged column, since it's just as easy to set it in the
+--    same statement that inserts the row. index.html:1217
+--    (`db.from('gyms').insert({owner_id:user.id,...fields})`) and
+--    index.html:1303 (`db.from('gym_members').insert({gym_id,user_id,
+--    status:'pending'})`) both insert client-controlled objects — nothing
+--    stopped a modified client from adding `verified_venue:true` or
+--    `member_role:'coach'` to those same insert payloads.
+--
+--    Correct fix (this version): REVOKE the table-level privilege entirely
+--    (both UPDATE and INSERT, on both tables), then GRANT it back only on an
+--    explicit, real column list — omitting verified_venue / member_role from
+--    that list entirely. This is not a no-op: with no table-level grant of
+--    that privilege left standing, a column-level grant is the ONLY grant
+--    that exists, so Postgres enforces it directly — any statement that
+--    reads or writes a column outside the granted list is rejected at the
+--    grant layer, regardless of what any row-level RLS policy would
+--    otherwise allow. The excluded columns (verified_venue, member_role)
+--    both already have working, non-null-violating defaults (verified_venue:
+--    `default false` from section 4 above; member_role: `default 'member'`
+--    from section 1 above), so omitting them from the INSERT grant list does
+--    not break normal inserts that don't attempt to set them.
+--
+--    Real column lists below were built by reading every actual
+--    db.from('gyms')/db.from('gym_members') insert/update call site in
+--    index.html (there are exactly five: gyms update at :1214 and :1229,
+--    gyms insert at :1217, gym_members insert at :1303, gym_members update
+--    at :1330) — not guessed.
+--      gyms UPDATE columns in use: name, location, sports, team, address,
+--        contact, bio (the `fields` object, :1214), plus avatar_url (:1229).
+--      gyms INSERT columns in use: owner_id plus the same `fields` object
+--        (:1217). id and created_at are never supplied by the client and the
+--        existing insert already works without them, confirming both already
+--        have working server-side defaults independent of this migration.
+--      gym_members UPDATE columns in use: status only (:1330).
+--      gym_members INSERT columns in use: gym_id, user_id, status (:1303).
+--        id and created_at are, likewise, never supplied by the client and
+--        the existing insert already works without them.
+--
+--    The two SECURITY DEFINER functions below (admin_set_venue_verification,
+--    set_member_role) are unchanged from v1 — confirmed correct and are the
+--    only sanctioned way to write verified_venue / member_role now that the
+--    ordinary grant path excludes them.
 --
 --    ⚠️ ADMIN-CHECK ASSUMPTION — verified, not guessed: index.html itself
 --    (~line 8998-9008) reads profiles.is_admin straight from Supabase after
@@ -305,10 +357,17 @@ alter table public.gyms
 --    function below reuses that exact column.
 -- ----------------------------------------------------------------------------
 
--- Block ordinary clients (owner's own UPDATE policy included) from touching
--- verified_venue directly, no matter what row-level policy would otherwise
--- allow on the rest of the row.
-revoke update (verified_venue) on public.gyms from authenticated, anon;
+-- GYMS: revoke the table-level grants entirely, then re-grant only on the
+-- real, in-use safe column lists. verified_venue is deliberately omitted from
+-- both lists — it already has a `default false` (section 4), so omitting it
+-- from the INSERT list doesn't break gym creation.
+revoke update on public.gyms from authenticated, anon;
+grant update (name, location, sports, team, address, contact, bio, avatar_url)
+  on public.gyms to authenticated;
+
+revoke insert on public.gyms from authenticated, anon;
+grant insert (owner_id, name, location, sports, team, address, contact, bio)
+  on public.gyms to authenticated;
 
 -- Only an admin (profiles.is_admin = true) may flip a gym's certification.
 create or replace function public.admin_set_venue_verification(gym_id uuid, verified boolean)
@@ -331,10 +390,16 @@ begin
 end;
 $$;
 
--- Block ordinary clients from self-promoting/demoting their own membership
--- role, no matter what row-level policy would otherwise allow on the rest of
--- the gym_members row.
-revoke update (member_role) on public.gym_members from authenticated, anon;
+-- GYM_MEMBERS: same shape — revoke the table-level grants entirely, then
+-- re-grant only on the real, in-use safe column lists. member_role is
+-- deliberately omitted from both lists — it already has a `default 'member'`
+-- (section 1), so omitting it from the INSERT list doesn't break normal
+-- join-request inserts.
+revoke update on public.gym_members from authenticated, anon;
+grant update (status) on public.gym_members to authenticated;
+
+revoke insert on public.gym_members from authenticated, anon;
+grant insert (gym_id, user_id, status) on public.gym_members to authenticated;
 
 -- Only the owner of the gym a membership belongs to may set that member's
 -- role (a gym owner designating their own coaches is the correct authority
@@ -382,14 +447,18 @@ $$;
 --    'coach' (so they don't need a separate gym_members row of their own) is
 --    left open — this migration only adds the column and constraint, not
 --    any inference logic connecting gyms.owner_id to gym_members.member_role.
--- 4. The column-level REVOKEs in section 5 mean the existing index.html
---    gym-edit call (~line 1214, db.from('gyms').update(fields).eq('id',
---    gymId)) will silently fail to change verified_venue if `fields` ever
---    includes it (Postgres raises a permission-denied error on that column,
---    which .update() surfaces as an error result, not a silent no-op — but
---    index.html doesn't send verified_venue today, so nothing breaks until
---    application code is wired to admin_set_venue_verification separately).
---    Same applies to any existing gym_members update call and member_role.
---    That wiring (calling the new RPC functions instead of a raw column
---    update) is separate, later follow-up work, not done in this migration.
+-- 4. Section 5's table-level REVOKE + column-list re-GRANT means the
+--    existing index.html gym-edit call (~line 1214, db.from('gyms')
+--    .update(fields).eq('id', gymId)) would fail its whole UPDATE statement
+--    with a permission-denied error if `fields` ever included verified_venue
+--    (Postgres rejects the entire statement — not just that one column — when
+--    an UPDATE/INSERT targets any column outside the granted list, and
+--    .update()/.insert() surface that as an error result, not a silent
+--    no-op). index.html doesn't send verified_venue or member_role today
+--    (confirmed by reading every real call site — see section 5's comment),
+--    so nothing breaks until application code is wired to
+--    admin_set_venue_verification / set_member_role separately. That wiring
+--    (calling the new RPC functions instead of a raw column update, if a UI
+--    for either is ever added) is separate, later follow-up work, not done in
+--    this migration.
 -- ----------------------------------------------------------------------------
