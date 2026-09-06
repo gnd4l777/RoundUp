@@ -2665,16 +2665,21 @@ function renderEventsComingSoon(){
       <div class="pb-safe"></div>
     </div>`;
 }
+function getRoleScopedEvents(role){
+  let evts=state.events;
+  if(role==='creator'||!ROLE_PROFILES[role]?.userId)evts=evts.filter(e=>e.status==='published');
+  if(role==='gym'){evts=evts.filter(e=>e.hostGym===ROLE_PROFILES[role].userId);}
+  if(isOfficialRole(role)){evts=state.events.filter(e=>Object.values(e.officials).includes(ROLE_PROFILES[role].userId)||e.status==='draft');}
+  return evts;
+}
+
 function renderEvents(role){
   // Everyone is a Creator during the soft launch. Show the "coming soon"
   // roadmap + a clearly-labeled preview of what sanctioned events will look like.
   if(role==='creator'||!ROLE_PROFILES[role]?.userId){
     return renderEventsComingSoon();
   }
-  let evts=state.events;
-  if(role==='creator'||!ROLE_PROFILES[role]?.userId)evts=evts.filter(e=>e.status==='published');
-  if(role==='gym'){evts=evts.filter(e=>e.hostGym===ROLE_PROFILES[role].userId);}
-  if(isOfficialRole(role)){evts=state.events.filter(e=>Object.values(e.officials).includes(ROLE_PROFILES[role].userId)||e.status==='draft');}
+  const evts=getRoleScopedEvents(role);
   const newCardBtn=role==='gym'?`<div style="padding:14px 18px 0"><button class="btn-primary" style="width:100%;padding:13px;font-size:13px" onclick="openNewCard()">+ Create New Draft Card</button></div>`
     :(role==='fighter'||role==='fighter2'||role==='fighter3')?`<div style="padding:14px 18px 0;display:flex;gap:8px"><button class="btn-primary" style="flex:1;padding:12px;font-size:12px" onclick="openCreateFighterDraftCard()">+ Create Fighter Card</button><button class="btn-secondary" style="flex:1;padding:12px;font-size:12px" onclick="openVenueMarketplace()">Browse Venues</button></div>`
     :'';
@@ -2690,8 +2695,6 @@ function renderEvents(role){
   const gymVenueBoard=role==='gym'?renderGymVenueBoard():'';
 
   if(evts.length===0&&myFighterDraftCards.length===0&&!gymVenueBoard)return newCardBtn+renderEmpty('No events yet',role==='gym'?'Create a draft fight card to get started':'Check back soon');
-  const published=evts.filter(e=>e.status==='published');
-  const drafts=evts.filter(e=>e.status==='draft');
   let body=newCardBtn;
 
   // Fighter draft cards — only shown to that fighter
@@ -2725,14 +2728,11 @@ function renderEvents(role){
     }).join('');
   }
 
-  if(published.length>0){
-    body+=`<div class="sec-head"><div class="sec-title">${role==='gym'?'Published Cards':'Upcoming Events'}</div></div>`;
-    body+=published.map(e=>renderEventListItem(e)).join('');
-  }
-  if(drafts.length>0&&role!=='fan'){
-    body+=`<div class="sec-head"><div class="sec-title">${role==='gym'?'Your Drafts':'Drafts in Progress'}</div></div>`;
-    body+=drafts.map(e=>renderEventListItem(e)).join('');
-  }
+  // Weight class / date / location filters — actually filter the list below,
+  // re-rendered into #eventsListArea so the location text field doesn't lose
+  // focus on every keystroke (see setEventsLocationFilter).
+  body+=renderEventsFilterBar();
+  body+=`<div id="eventsListArea">${renderEventsListBody(role)}</div>`;
 
   // Gym venue board — shows fighter cards ready for venue offers
   if(gymVenueBoard){
@@ -2771,6 +2771,174 @@ function renderEventListItem(e){
       </div>
     </div>
   `;
+}
+
+/* ───── Events tab filters — weight class / date / location ─────
+   Real filtering (not decorative): a select, a text field, and date chips
+   that narrow the same published/draft lists renderEventListItem draws from. */
+function getEventsFilter(){
+  if(!state.eventsFilter)state.eventsFilter={weightClass:'',when:'all',location:''};
+  return state.eventsFilter;
+}
+function setEventsFilter(field,val){
+  const f=getEventsFilter();
+  f[field]=val;
+  saveState();
+  render();
+}
+// Location is a text field — re-rendering the whole tab on every keystroke
+// would blow away focus/caret position, so this only swaps the list body
+// (mirrors the saveCardField/saveBoutField "avoid full re-render" pattern).
+function setEventsLocationFilter(val){
+  const f=getEventsFilter();
+  f.location=val;
+  saveState();
+  const body=document.getElementById('eventsListArea');
+  if(body)body.innerHTML=renderEventsListBody(state.currentRole);
+}
+function clearEventsFilters(){
+  state.eventsFilter={weightClass:'',when:'all',location:''};
+  saveState();
+  render();
+}
+// Weight class options: the canonical OSAC_WEIGHT_CLASSES names (same table
+// used for adult amateur/pro-am classification elsewhere), plus any other
+// weightClass strings actually present on real cards (e.g. women's classes)
+// so a card is never hidden just because its label isn't in the base list.
+function getEventWeightClassOptions(){
+  const base=OSAC_WEIGHT_CLASSES.map(c=>c.name);
+  const extra=[];
+  (state.events||[]).forEach(e=>(e.fights||[]).forEach(f=>{
+    if(f.weightClass&&!base.includes(f.weightClass)&&!extra.includes(f.weightClass))extra.push(f.weightClass);
+  }));
+  return base.concat(extra);
+}
+// Event dates on RoundUp are free-text entered by the host (e.g. "Sat Sep 20"),
+// not a date picker — so this deliberately does NOT hand the raw string to the
+// browser's Date() constructor (its fallback parsing of non-standard strings
+// is inconsistent across browsers, and can silently return a bogus date for
+// unparseable text). Instead it only recognizes an explicit "<month> <day>"
+// or ISO yyyy-mm-dd pattern; anything else returns null and the date filter
+// fails open (the event still shows) rather than hiding it on a bad guess.
+const RU_MONTH_NAMES=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+function parseEventDateLoose(str){
+  if(!str)return null;
+  const s=String(str).trim().toLowerCase();
+  if(!s)return null;
+  const now=new Date();
+  const iso=s.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  if(iso){
+    const d=new Date(+iso[1],+iso[2]-1,+iso[3]);
+    return isNaN(d.getTime())?null:d;
+  }
+  const m=s.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:[^0-9]*\b(20\d{2})\b)?/);
+  if(!m)return null;
+  const monthIdx=RU_MONTH_NAMES.indexOf(m[1]);
+  const day=parseInt(m[2],10);
+  if(monthIdx<0||day<1||day>31)return null;
+  const year=m[3]?parseInt(m[3],10):now.getFullYear();
+  let d=new Date(year,monthIdx,day);
+  // JS Date silently rolls invalid days into the next month (e.g. Feb 30 ->
+  // Mar 2). That's a bogus reading of the host's text, not a real date, so
+  // treat it the same as unparseable rather than filtering on a wrong month.
+  if(d.getMonth()!==monthIdx)return null;
+  if(!m[3]){
+    // No year in the text — if that reading is already >1 month in the past,
+    // the host almost certainly meant next year, not last year.
+    const cutoff=new Date(now.getTime()-31*86400000);
+    if(d.getTime()<cutoff.getTime())d=new Date(year+1,monthIdx,day);
+  }
+  return isNaN(d.getTime())?null:d;
+}
+function eventMatchesFilters(e,filt){
+  filt=filt||getEventsFilter();
+  if(filt.weightClass){
+    const wc=filt.weightClass.toLowerCase();
+    if(!(e.fights||[]).some(f=>(f.weightClass||'').toLowerCase()===wc))return false;
+  }
+  if(filt.location){
+    const q=filt.location.trim().toLowerCase();
+    if(q){
+      const addr=(e.address||'').trim().toLowerCase();
+      // Address is the only field that ever holds real city/state text — it's
+      // filled in from the accepting gym's location once a venue offer is
+      // accepted, but until then (and in most seed/demo events) it's just the
+      // literal placeholder 'TBD', and `venue` on its own is a bare venue name
+      // with no city/state in it. Enforcing a city/state filter against that
+      // would hide essentially every real open slot by default, so this only
+      // checks location once there's a genuine address to check it against —
+      // same "don't hide over missing data" approach as the date filter below.
+      if(addr&&addr!=='tbd'){
+        const venue=(e.venue||'').trim().toLowerCase();
+        const hay=(venue+' '+addr).trim();
+        // Drop short tokens (state codes like "OK", "NY") before matching — otherwise
+        // a 2-letter token can substring-match unrelated text (e.g. "OK" inside
+        // "Brooklyn"), producing false positives. Falls back to the full token list
+        // if every token happens to be short, so we still match on *something*.
+        const qWords=q.split(/[,\s]+/).filter(Boolean);
+        const meaningfulWords=qWords.filter(w=>w.length>=3);
+        const wordsToMatch=meaningfulWords.length?meaningfulWords:qWords;
+        if(!wordsToMatch.some(w=>hay.includes(w)))return false;
+      }
+    }
+  }
+  if(filt.when&&filt.when!=='all'){
+    const d=parseEventDateLoose(e.date);
+    if(d){
+      const today=new Date();today.setHours(0,0,0,0);
+      const diffDays=Math.floor((d.getTime()-today.getTime())/86400000);
+      if(filt.when==='week'&&(diffDays<0||diffDays>7))return false;
+      if(filt.when==='month'&&(diffDays<0||diffDays>31))return false;
+    }
+    // Unparseable date — fail open, don't hide the card over a guess.
+  }
+  return true;
+}
+function renderEventsFilterBar(){
+  const filt=getEventsFilter();
+  const wcOptions=getEventWeightClassOptions();
+  const whenChips=[['all','All Dates'],['week','This Week'],['month','This Month']];
+  const hasActiveFilter=!!(filt.weightClass||filt.location||(filt.when&&filt.when!=='all'));
+  return `
+    <div style="padding:12px 18px 4px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+        <select class="edit-input" style="font-size:12px;padding:9px 10px" onchange="setEventsFilter('weightClass',this.value)">
+          <option value="">All Weight Classes</option>
+          ${wcOptions.map(w=>`<option value="${escapeHtml(w)}" ${filt.weightClass===w?'selected':''}>${escapeHtml(w)}</option>`).join('')}
+        </select>
+        <input class="edit-input" style="font-size:12px;padding:9px 10px" placeholder="City or venue..." value="${escapeHtml(filt.location||'')}" oninput="setEventsLocationFilter(this.value)">
+      </div>
+      <div class="disco-tabs" style="padding:0;margin:0 0 4px">
+        ${whenChips.map(([k,lbl])=>`<div class="disco-chip ${filt.when===k?'active':''}" onclick="setEventsFilter('when','${k}')">${lbl}</div>`).join('')}
+        ${hasActiveFilter?`<div class="disco-chip" style="border-color:var(--red);color:var(--red)" onclick="clearEventsFilters()">Clear ✕</div>`:''}
+      </div>
+    </div>`;
+}
+// The actual filtered list body — pulled into its own function so both a
+// full render() and the focus-preserving location-input handler can refresh
+// it without re-running the rest of renderEvents().
+function renderEventsListBody(role){
+  const evts=getRoleScopedEvents(role);
+  const filt=getEventsFilter();
+  const filtered=evts.filter(e=>eventMatchesFilters(e,filt));
+  const published=filtered.filter(e=>e.status==='published');
+  const drafts=filtered.filter(e=>e.status==='draft');
+  let body='';
+  if(published.length>0){
+    body+=`<div class="sec-head"><div class="sec-title">${role==='gym'?'Published Cards':'Upcoming Events'}</div></div>`;
+    body+=published.map(e=>renderEventListItem(e)).join('');
+  }
+  if(drafts.length>0&&role!=='fan'){
+    body+=`<div class="sec-head"><div class="sec-title">${role==='gym'?'Your Drafts':'Drafts in Progress'}</div></div>`;
+    body+=drafts.map(e=>renderEventListItem(e)).join('');
+  }
+  if(!body){
+    const active=filt.weightClass||filt.location||(filt.when&&filt.when!=='all');
+    body=active
+      ?`<div class="empty"><div class="empty-icon">🔎</div><div class="empty-title">No matching events</div><div class="empty-text">No open cards match your current weight class, date, or location filters.</div><button class="empty-btn" onclick="clearEventsFilters()">Clear filters</button></div>`
+      :'';
+  }
+  return body;
 }
 
 function renderSponsorEvents(){
@@ -2988,7 +3156,7 @@ function openGymVenueOffer(fdcId){
     ${listings.length===0?`
       <div style="text-align:center;padding:20px 0;color:var(--mid);font-size:12px">
         No open venue listings found.<br>
-        <button onclick="openListVenueSlot();closeActionModal();" style="margin-top:10px;background:var(--blue);color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">+ Add a Venue Listing</button>
+        <button onclick="openAddVenueListing()" style="margin-top:10px;background:var(--blue);color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">+ Add a Venue Listing</button>
       </div>`:`
     <div style="display:flex;flex-direction:column;gap:10px">
       ${listings.map(l=>`
@@ -4957,15 +5125,36 @@ function renderEventDraftDetail(e){
 
 function claimFightSlot(eid,fid){
   if(!requireVerified('claim_fight'))return;
-  // Check mandatory suspension window before allowing slot claim
-  const myId=ROLE_PROFILES[state.currentRole]?.userId;
-  const susp=checkFighterSuspension(myId);
-  if(susp&&susp.suspended){alert('Cannot claim fight slot.\n\n'+susp.reason+'\n\nYou are in a mandatory medical suspension window. Contact your physician for clearance, then report your status to FightFax at (856) 396-0533.');return;}
-  if(!confirm('Claim this fight slot? You will be added to the draft card.'))return;
   const e=state.events.find(x=>x.id===eid);
   if(!e)return;
   const f=e.fights.find(x=>x.id===fid);
   if(!f)return;
+  // Check mandatory suspension window before allowing slot claim
+  const myId=ROLE_PROFILES[state.currentRole]?.userId;
+  const susp=checkFighterSuspension(myId);
+  if(susp&&susp.suspended){alert('Cannot claim fight slot.\n\n'+susp.reason+'\n\nYou are in a mandatory medical suspension window. Contact your physician for clearance, then report your status to FightFax at (856) 396-0533.');return;}
+  // Weight-class eligibility (USA Boxing Appendix F) — reuses the same
+  // getWeightClass/getWeightDifferential thresholds checkAppendixFMatch and
+  // the matchmaker use elsewhere, rather than inventing new tolerance numbers.
+  // Fails open (doesn't block) if we don't have the fighter's weight on file —
+  // same fail-open convention as the suspension check just above.
+  const me=state.users[myId];
+  if(me&&me.weightClass&&f.weight){
+    const myWeightLbs=me.weightClass; // app convention: `.weightClass` on a user record holds weight-in-lbs, not a label
+    const division=getBoxerDivision(me.age||25,me.gender||'male')||'elite_male';
+    const myClass=getWeightClass(myWeightLbs,division);
+    const boutClass=getWeightClass(f.weight,division);
+    const weightDiff=Math.abs(myWeightLbs-f.weight);
+    const allowedDiff=getWeightDifferential(Math.max(myClass,boutClass),division);
+    if(myClass!==boutClass&&weightDiff>allowedDiff){
+      alert('Cannot claim this slot.\n\nThis bout is listed at '+(f.weightClass||(f.weight+' lbs'))+' ('+f.weight+' lbs). Your registered weight is '+myWeightLbs+' lbs — a '+weightDiff+'lb difference, which exceeds the USA Boxing Appendix F maximum of '+allowedDiff+'lbs for this weight class.\n\nLook for an open slot closer to your weight.');
+      return;
+    }
+    if(myClass!==boutClass&&weightDiff>0){
+      if(!confirm('Heads up: this bout is listed at '+(f.weightClass||(f.weight+' lbs'))+', and your registered weight is '+myWeightLbs+' lbs ('+weightDiff+'lb difference). That\'s within the Appendix F tolerance (max '+allowedDiff+'lbs) for this class, so it\'s legal — but tap Cancel if you\'d rather find a closer match.\n\nContinue claiming this slot?'))return;
+    }
+  }
+  if(!confirm('Claim this fight slot? You will be added to the draft card.'))return;
   if(!f.f1)f.f1=myId;else if(!f.f2)f.f2=myId;
   saveState();render();
 }
@@ -8557,13 +8746,40 @@ function openFindBout(){
   if(!me)return;
   openActionModal('Find a Bout',`
     <div style="display:flex;flex-direction:column;gap:12px">
-      <div><div class="edit-label">Weight class</div><input class="edit-input" id="fb_weight" value="${me.weight||'Welterweight'}" placeholder="e.g. Welterweight"></div>
+      <div><div class="edit-label">Weight class</div><select class="edit-input" id="fb_weight">
+        <option value="">Any weight class</option>
+        ${getEventWeightClassOptions().map(w=>`<option value="${escapeHtml(w)}" ${(me.weight||'Welterweight')===w?'selected':''}>${escapeHtml(w)}</option>`).join('')}
+      </select></div>
       <div><div class="edit-label">Preferred date range</div><input class="edit-input" id="fb_date" placeholder="e.g. June 2025"></div>
       <div><div class="edit-label">Location preference</div><input class="edit-input" id="fb_loc" value="${me.location||'Tulsa, OK'}" placeholder="City, State"></div>
       <div><div class="edit-label">Message to matchmakers (optional)</div><input class="edit-input" id="fb_msg" placeholder="e.g. Looking for 4-round bout..."></div>
       <div style="background:rgba(245,166,35,.06);border:1px solid rgba(245,166,35,.15);border-radius:8px;padding:10px;font-size:11px;color:var(--lighter)">Your request goes to verified gyms and matchmakers in your area. <strong style="color:var(--gold)">USA Boxing requirement:</strong> matchmaker and promoter must be separate persons. Cross-gym matching available — if no opponent exists at your gym in your weight class, RoundUp will search the Oklahoma LBC fighter registry. Women fighters: RoundUp applies separate Appendix F weight classes and bout rules automatically.</div>
     </div>
-  `,'Submit Request',()=>alert('Bout request submitted! Verified gyms and matchmakers in Tulsa will be notified.'));
+  `,'Find Matching Slots',()=>{
+    const weight=document.getElementById('fb_weight')?.value?.trim()||'';
+    const dateText=document.getElementById('fb_date')?.value?.trim()||'';
+    const loc=document.getElementById('fb_loc')?.value?.trim()||'';
+    const msg=document.getElementById('fb_msg')?.value?.trim()||'';
+    // Actually apply this as a real filter against the events list (same
+    // filter logic the Events tab uses) instead of just showing a toast.
+    const filt=getEventsFilter();
+    filt.weightClass=weight;
+    filt.location=loc;
+    filt.when='all';
+    saveState();
+    closeActionModal();
+    setTab('events');
+    setTimeout(()=>{
+      const matches=(state.events||[]).filter(e=>e.status==='published').filter(e=>eventMatchesFilters(e,filt));
+      const dateNote=dateText?'\n\n(Your date preference "'+dateText+'" isn\'t applied as a strict filter — event dates on RoundUp are entered as free text by the host, so it can\'t be matched precisely. Open a card below to check its date directly.)':'';
+      const msgNote=msg?'\n\nYour note has been saved for reference: "'+msg+'"':'';
+      if(matches.length>0){
+        alert('Found '+matches.length+' open card'+(matches.length===1?'':'s')+' matching'+(weight?(' '+weight):'')+(loc?(' near '+loc):'')+'.\n\nThese filters are now applied on the Events tab below — open a card to claim an open slot.'+dateNote+msgNote);
+      }else{
+        alert('No open cards match that search right now.\n\nYour filters'+(weight||loc?(' ('+[weight,loc].filter(Boolean).join(', ')+')'):'')+' are still applied on the Events tab, so you\'ll see matches as soon as a gym or fighter publishes one.'+dateNote+msgNote);
+      }
+    },200);
+  });
 }
 
 // Fighter: Connect with payout method
