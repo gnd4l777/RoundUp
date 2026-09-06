@@ -2871,8 +2871,14 @@ function eventMatchesFilters(e,filt){
       if(addr&&addr!=='tbd'){
         const venue=(e.venue||'').trim().toLowerCase();
         const hay=(venue+' '+addr).trim();
+        // Drop short tokens (state codes like "OK", "NY") before matching — otherwise
+        // a 2-letter token can substring-match unrelated text (e.g. "OK" inside
+        // "Brooklyn"), producing false positives. Falls back to the full token list
+        // if every token happens to be short, so we still match on *something*.
         const qWords=q.split(/[,\s]+/).filter(Boolean);
-        if(!qWords.some(w=>hay.includes(w)))return false;
+        const meaningfulWords=qWords.filter(w=>w.length>=3);
+        const wordsToMatch=meaningfulWords.length?meaningfulWords:qWords;
+        if(!wordsToMatch.some(w=>hay.includes(w)))return false;
       }
     }
   }
