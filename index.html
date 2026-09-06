@@ -2608,11 +2608,10 @@ async function loadInbox(){
 // database yet, so every call below fails gracefully (try/catch + console.log
 // + an honest error state) rather than assuming the table exists.
 //
-// Category dropdown intentionally matches ONLY the migration's check
-// constraint values (wedding/reunion/tournament/other) — NOT the wedding/
-// reunion/tournament/fundraiser/showcase/other list floated in the task,
-// since 'fundraiser' and 'showcase' aren't in the DB constraint and an insert
-// with either would be rejected once the migration is applied.
+// Category dropdown matches the migration's check constraint values, which
+// were widened to wedding/reunion/tournament/fundraiser/showcase/other (see
+// supabase/migrations/20260905000000_add_events_tables.sql) — all 6 values
+// below are valid and an insert with any of them will be accepted.
 const GENERAL_EVENT_CATEGORIES=[['wedding','Wedding'],['reunion','Reunion'],['tournament','Tournament'],['fundraiser','Fundraiser'],['showcase','Showcase'],['other','Other']];
 const GENERAL_EVENT_CATEGORY_LABELS={wedding:'Wedding',reunion:'Reunion',tournament:'Tournament',fundraiser:'Fundraiser',showcase:'Showcase',other:'Other'};
 
@@ -2668,7 +2667,7 @@ function renderGeneralEvents(){
   if(!window._geLoaded){ window._geLoaded=true; setTimeout(loadGeneralEvents,0); }
   const evts=state.generalEvents||[];
   const createBtn=`<div style="padding:14px 18px 0"><button class="btn-primary" style="width:100%;padding:13px;font-size:13px" onclick="openGeneralEventForm()">+ Post an Event</button></div>`;
-  const head=`<div style="padding:10px 18px 0"><div style="background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.12);border-radius:var(--r);padding:8px 12px;font-size:10px;color:var(--gold);line-height:1.4">🎉 Weddings, reunions, tournaments & more — self-posted, not verified by RoundUp. Combat sports fight cards live in a separate sanctioned system.</div></div>`;
+  const head=`<div style="padding:10px 18px 0"><div style="background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.12);border-radius:var(--r);padding:8px 12px;font-size:10px;color:var(--gold);line-height:1.4">🎉 Weddings, reunions, tournaments & more — self-posted, not verified by RoundUp. Combat sports fight cards are handled separately and aren't live yet.</div></div>`;
 
   if(state.generalEventsLoading&&evts.length===0){
     return createBtn+head+`<div class="empty" style="padding:40px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading events…</div></div>`;
