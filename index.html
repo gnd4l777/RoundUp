@@ -1853,6 +1853,8 @@ function render(){
     wrap.innerHTML=renderGymPage();
   }else if(state.currentScreen==='event_detail'){
     wrap.innerHTML=renderEventDetail();
+  }else if(state.currentScreen==='general_event_detail'){
+    wrap.innerHTML=renderGeneralEventDetail();
   }else{
     wrap.innerHTML=renderMain();
   }
@@ -2299,7 +2301,7 @@ function renderDirectory(){
     return head+`<div class="empty"><div class="empty-icon">🏀</div><div class="empty-title">Court Sports — Coming Soon</div><div class="empty-text">Basketball and Pickleball aren't live on RoundUp yet. Combat sports are fully active — tap "All" or "Fighters" to browse them.</div><button class="empty-btn" onclick="setFindFilter('all')">Back to all members</button></div>`;
   }
   if(filter==='social'){
-    return head+`<div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">Social Events — Coming Soon</div><div class="empty-text">Weddings, reunions, fundraisers, and brand showcases aren't live on RoundUp yet. Combat sports are fully active — tap "All" or "Fighters" to browse them.</div><button class="empty-btn" onclick="setFindFilter('all')">Back to all members</button></div>`;
+    return head+`<div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">Social Events</div><div class="empty-text">Weddings, reunions, fundraisers, and brand showcases are posted in the Events tab, not here — this Find tab is for browsing people. Head to Events to see what's posted.</div><button class="empty-btn" onclick="setTab('events')">Go to Events</button></div>`;
   }
 
   if(state.dirLoading && all.length===0 && gyms.length===0){
@@ -2596,75 +2598,248 @@ async function loadInbox(){
 }
 
 /* ===== EVENTS ===== */
-// "Coming Soon" screen for the Events tab during soft launch. Shows the
-// roadmap of fight features and a CLEARLY-LABELED, non-interactive preview so
-// users can see what's coming without mistaking it for a working feature.
-function renderEventsComingSoon(){
+// ───── General (non-combat) events — real create + browse + detail ─────
+// Weddings, reunions, tournaments, and other community events. These live in
+// the real `events_general` Supabase table (see
+// supabase/migrations/20260905000000_add_events_tables.sql), completely
+// separate from the localStorage-only combat bout-card system (state.events /
+// renderEventDetail / openEvent) below — do not mix the two. NOTE: as of this
+// writing that migration is drafted but not necessarily applied to the live
+// database yet, so every call below fails gracefully (try/catch + console.log
+// + an honest error state) rather than assuming the table exists.
+//
+// Category dropdown matches the migration's check constraint values, which
+// were widened to wedding/reunion/tournament/fundraiser/showcase/other (see
+// supabase/migrations/20260905000000_add_events_tables.sql) — all 6 values
+// below are valid and an insert with any of them will be accepted.
+const GENERAL_EVENT_CATEGORIES=[['wedding','Wedding'],['reunion','Reunion'],['tournament','Tournament'],['fundraiser','Fundraiser'],['showcase','Showcase'],['other','Other']];
+const GENERAL_EVENT_CATEGORY_LABELS={wedding:'Wedding',reunion:'Reunion',tournament:'Tournament',fundraiser:'Fundraiser',showcase:'Showcase',other:'Other'};
+
+function fmtEventDateTime(iso){
+  const d=iso?new Date(iso):null;
+  if(!d||isNaN(d.getTime()))return 'Date TBD';
+  return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+}
+
+// Loads published/completed general events for the browse list. Non-fatal —
+// on any error (including "table doesn't exist yet") this fails to an honest
+// error state instead of crashing, matching loadDirectory()/loadGymPage().
+async function loadGeneralEvents(){
+  const db=window.ruDB; if(!db)return;
+  state.generalEventsLoading=true;
+  state.generalEventsError=false;
+  try{
+    const res=await db.from('events_general')
+      .select('id,title,description,category,start_time,end_time,venue_name,venue_address,owner_id,status,created_at')
+      .in('status',['published','completed'])
+      .order('start_time',{ascending:true})
+      .limit(200);
+    if(res.error)throw res.error;
+    state.generalEvents=res.data||[];
+  }catch(e){
+    console.log('loadGeneralEvents error:',e&&e.message);
+    state.generalEventsError=true;
+  }
+  state.generalEventsLoading=false;
+  if(state.currentTab==='events')render();
+}
+
+function renderGeneralEventCard(e){
+  const title=escapeHtml(e.title||'Untitled Event');
+  const catLabel=GENERAL_EVENT_CATEGORY_LABELS[e.category]||'Other';
+  const when=fmtEventDateTime(e.start_time);
+  const venue=escapeHtml(e.venue_name||'Venue TBD');
   return `
-    <div class="nav-bar"><div class="nav-wordmark">ROUNDUP</div><div class="nav-icons"><button class="nav-icon" onclick="openNotifications()">🔔<div class="nav-dot" style="display:none"></div></button><button class="nav-icon" onclick="openProfileMenu()" title="Account">👤</button></div></div>
+    <div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:12px 14px;cursor:pointer" onclick="openGeneralEvent('${e.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div style="font-size:14px;font-weight:600;color:var(--white)">${title}</div>
+        <span style="font-size:9px;font-weight:600;padding:2px 8px;border-radius:8px;background:rgba(245,166,35,.12);color:var(--gold);text-transform:uppercase;flex-shrink:0">${catLabel}</span>
+      </div>
+      <div style="font-size:11px;color:var(--mid);margin-top:6px">📅 ${when}</div>
+      <div style="font-size:11px;color:var(--mid);margin-top:2px">📍 ${venue}</div>
+    </div>`;
+}
+
+// Replaces the old static "Coming Soon" screen for creator-role/unlicensed
+// users. Real create + browse for general (non-combat) events — no RSVP/
+// interest tracking, ticketing, or payment (deliberately out of scope).
+function renderGeneralEvents(){
+  if(!window._geLoaded){ window._geLoaded=true; setTimeout(loadGeneralEvents,0); }
+  const evts=state.generalEvents||[];
+  const createBtn=`<div style="padding:14px 18px 0"><button class="btn-primary" style="width:100%;padding:13px;font-size:13px" onclick="openGeneralEventForm()">+ Post an Event</button></div>`;
+  const head=`<div style="padding:10px 18px 0"><div style="background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.12);border-radius:var(--r);padding:8px 12px;font-size:10px;color:var(--gold);line-height:1.4">🎉 Weddings, reunions, tournaments & more — self-posted, not verified by RoundUp. Combat sports fight cards are handled separately and aren't live yet.</div></div>`;
+
+  if(state.generalEventsLoading&&evts.length===0){
+    return createBtn+head+`<div class="empty" style="padding:40px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading events…</div></div>`;
+  }
+  if(evts.length===0){
+    if(state.generalEventsError)return createBtn+head+`<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn't load events right now</div><div class="empty-text">Something went wrong loading events. Please try again.</div><button class="empty-btn" onclick="loadGeneralEvents()">Tap to retry</button></div>`;
+    return createBtn+head+`<div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">No events posted yet</div><div class="empty-text">Weddings, reunions, tournaments, and more — be the first to post one.</div></div>`;
+  }
+  return createBtn+head+`<div style="padding:12px 18px 0;display:flex;flex-direction:column;gap:8px">${evts.map(renderGeneralEventCard).join('')}</div><div class="pb-safe"></div>`;
+}
+
+// Create-a-general-event form modal. Mirrors openGymForm()'s modal pattern.
+function openGeneralEventForm(){
+  let m=document.getElementById('ruGeneralEventForm');
+  if(!m){m=document.createElement('div');m.id='ruGeneralEventForm';m.className='modal-bg';m.onclick=function(e){if(e.target===m)m.style.display='none';};document.body.appendChild(m);}
+  const inp='width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:\'DM Sans\',sans-serif;margin-top:5px;box-sizing:border-box';
+  const lbl='font-size:12px;color:var(--mid);display:block;margin-top:10px';
+  m.innerHTML=`
+    <div class="modal" style="text-align:left;max-height:85vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white)">Post an Event</div>
+      <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">🎉 For weddings, reunions, tournaments, and other community events — not combat-sports fight cards. This posts publicly as soon as you submit it.</div>
+
+      <label style="${lbl};margin-top:0">Event title <span style="color:var(--red)">*</span></label>
+      <input id="ge_title" type="text" placeholder="e.g. Smith Family Reunion 2026" style="${inp}">
+      <label style="${lbl}">Category</label>
+      <select id="ge_category" style="${inp}">
+        ${GENERAL_EVENT_CATEGORIES.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}
+      </select>
+      <label style="${lbl}">Description (optional)</label>
+      <textarea id="ge_description" rows="3" placeholder="Tell people what this event is about..." style="${inp};resize:vertical"></textarea>
+      <label style="${lbl}">Start date & time <span style="color:var(--red)">*</span></label>
+      <input id="ge_start" type="datetime-local" style="${inp}">
+      <label style="${lbl}">End date & time (optional)</label>
+      <input id="ge_end" type="datetime-local" style="${inp}">
+      <label style="${lbl}">Venue name (optional)</label>
+      <input id="ge_venue_name" type="text" placeholder="e.g. Tulsa Convention Center" style="${inp}">
+      <label style="${lbl}">Venue address (optional)</label>
+      <input id="ge_venue_address" type="text" placeholder="123 Main St, Tulsa, OK 74103" style="${inp}">
+
+      <div id="geMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
+      <button id="geSaveBtn" onclick="saveGeneralEvent()" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">Post event</button>
+      <button onclick="document.getElementById('ruGeneralEventForm').style.display='none'" style="width:100%;background:transparent;color:var(--mid);border:none;padding:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:2px">Cancel</button>
+    </div>`;
+  m.style.display='flex';
+}
+
+async function saveGeneralEvent(){
+  const db=window.ruDB; if(!db){alert('Not connected.');return;}
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  const title=(document.getElementById('ge_title').value||'').trim();
+  const category=document.getElementById('ge_category').value||'other';
+  const description=(document.getElementById('ge_description').value||'').trim();
+  const startRaw=document.getElementById('ge_start').value;
+  const endRaw=document.getElementById('ge_end').value;
+  const venueName=(document.getElementById('ge_venue_name').value||'').trim();
+  const venueAddress=(document.getElementById('ge_venue_address').value||'').trim();
+  const msg=document.getElementById('geMsg');
+  const btn=document.getElementById('geSaveBtn');
+  if(!title){msg.textContent='Please enter an event title.';return;}
+  if(!startRaw){msg.textContent='Please choose a start date & time.';return;}
+  const startTime=new Date(startRaw);
+  if(isNaN(startTime.getTime())){msg.textContent='Start date & time looks invalid.';return;}
+  let endTime=null;
+  if(endRaw){
+    endTime=new Date(endRaw);
+    if(isNaN(endTime.getTime())){msg.textContent='End date & time looks invalid.';return;}
+  }
+  btn.disabled=true;btn.textContent='Posting…';
+  try{
+    const fields={
+      owner_id:user.id,
+      title:title,
+      description:description||null,
+      category:category,
+      start_time:startTime.toISOString(),
+      end_time:endTime?endTime.toISOString():null,
+      venue_name:venueName||null,
+      venue_address:venueAddress||null,
+      status:'published'
+    };
+    const {error}=await db.from('events_general').insert(fields);
+    if(error)throw error;
+    const gm=document.getElementById('ruGeneralEventForm'); if(gm)gm.style.display='none';
+    await loadGeneralEvents();
+    render();
+    alert('Event posted!');
+  }catch(e){
+    console.log('saveGeneralEvent error:',e&&e.message);
+    msg.textContent='Could not post this event. Please check your entries and try again.';
+    btn.disabled=false;btn.textContent='Post event';
+  }
+}
+
+// Loads a single general event by id for the detail screen. Non-fatal —
+// mirrors loadGymPage()'s error handling.
+async function loadGeneralEvent(id){
+  const db=window.ruDB; if(!db||!id)return;
+  state.geViewLoading=true;
+  state.geViewError=false;
+  try{
+    const res=await db.from('events_general').select('*').eq('id',id).limit(1);
+    if(res.error)throw res.error;
+    state.geView=(res.data&&res.data[0])||null;
+    state.geViewId=id;
+  }catch(e){
+    console.log('loadGeneralEvent error:',e&&e.message);
+    state.geView=null;
+    state.geViewId=id;
+    state.geViewError=true;
+  }
+  state.geViewLoading=false;
+  if(state.currentScreen==='general_event_detail'&&state.drilldown===id)render();
+}
+
+function openGeneralEvent(id){
+  if(typeof stopAllReelVideos==='function')stopAllReelVideos();
+  state.currentScreen='general_event_detail';
+  state.drilldown=id;
+  state.geViewId=null; state.geView=null; state.geViewError=false;
+  saveState();render();
+  setTimeout(()=>loadGeneralEvent(id),0);
+}
+
+function renderGeneralEventDetail(){
+  const id=state.drilldown;
+  if(state.geViewId!==id&&!state.geViewLoading){setTimeout(()=>loadGeneralEvent(id),0);}
+  const e=(state.geViewId===id)?state.geView:null;
+
+  if(state.geViewLoading&&!e){
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Event</div><div style="width:38px"></div></div><div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading event…</div></div>`;
+  }
+  if(!e){
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Event</div><div style="width:38px"></div></div><div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">${state.geViewError?"Couldn't load event":'Event not found'}</div><div class="empty-text">${state.geViewError?'Something went wrong loading this event. Please try again.':'This event may have been removed.'}</div></div>`;
+  }
+  const myId=window.ruUserId||null;
+  const isOwner=e.owner_id===myId;
+  const catLabel=GENERAL_EVENT_CATEGORY_LABELS[e.category]||'Other';
+  const start=fmtEventDateTime(e.start_time);
+  const end=e.end_time?fmtEventDateTime(e.end_time):'';
+
+  return `
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Event</div><div style="width:38px"></div></div>
     <div class="inner-scroll">
-      <div style="position:relative;overflow:hidden;padding:24px 18px 8px;text-align:center">
-        <div class="ph-pattern"></div>
-        <div style="position:relative;z-index:1">
-          <div style="font-size:40px;margin-bottom:8px">🥊</div>
-          <div style="font-size:11px;color:var(--gold);letter-spacing:1.5px;text-transform:uppercase;font-weight:600;margin-bottom:2px">Bouts · Tournaments · Community Events</div>
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:30px;letter-spacing:1px;color:var(--white);line-height:1">Events<br>Coming Soon</div>
-          <div style="font-size:13px;color:var(--light);line-height:1.6;margin-top:12px;max-width:340px;margin-left:auto;margin-right:auto">
-            RoundUp is building Tulsa's home for events — combat sports fight cards first, with tournaments, showcases, and other community events on the way. Right now it's a place for the community to post, connect, and follow each other. Live events are on the way — we're building them carefully and working toward USA Boxing LBC #27 sanctioning for combat cards so they're done right.
-          </div>
+      <div style="padding:20px 18px 14px">
+        <span style="font-size:9px;font-weight:600;padding:3px 10px;border-radius:10px;background:rgba(245,166,35,.12);color:var(--gold);text-transform:uppercase;letter-spacing:.5px">${catLabel}</span>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:1px;color:var(--white);margin-top:8px;line-height:1.1">${escapeHtml(e.title||'Untitled Event')}</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">
+          <div style="font-size:13px;color:var(--lighter)">📅 ${start}${end?' – '+end:''}</div>
+          ${e.venue_name?`<div style="font-size:13px;color:var(--lighter)">📍 ${escapeHtml(e.venue_name)}</div>`:''}
+          ${e.venue_address?`<div style="font-size:12px;color:var(--mid)">${escapeHtml(e.venue_address)}</div>`:''}
         </div>
       </div>
-
-      <div style="padding:14px 18px 4px"><div style="font-size:10px;color:var(--gold);letter-spacing:1.5px;text-transform:uppercase;font-weight:600">What's coming to Events</div></div>
-      <div style="padding:0 18px;display:flex;flex-direction:column;gap:8px">
-        ${[
-          ['🎟','Event tickets','Buy tickets to local fight cards right in the app, with reserved and ringside seating.'],
-          ['📋','Fight cards','Gyms and fighters build sanctioned cards — see the matchups, weights, and bout order.'],
-          ['🥊','Fighter profiles','Real verified fighter pages with records, rankings, and upcoming bouts.'],
-          ['⚖','Official booking','Referees, judges, and physicians get booked and confirmed for each event.'],
-          ['🎉','Social & community events','Weddings, reunions, fundraisers, and brand showcases — planned for after combat sports launch.'],
-        ].map(([ic,t,d])=>`
-          <div style="display:flex;gap:12px;align-items:flex-start;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:12px 14px">
-            <span style="font-size:18px;flex-shrink:0">${ic}</span>
-            <div><div style="font-size:13px;font-weight:600;color:var(--white);margin-bottom:2px">${t}</div><div style="font-size:11px;color:var(--mid);line-height:1.5">${d}</div></div>
-          </div>`).join('')}
-      </div>
-
-      <!-- Labeled preview mockup -->
-      <div style="padding:18px 18px 4px"><div style="font-size:10px;color:var(--mid);letter-spacing:1.5px;text-transform:uppercase;font-weight:600">Sneak peek</div></div>
-      <div style="padding:0 18px">
-        <div style="position:relative;border:1px solid var(--dark4);border-radius:var(--r);overflow:hidden;opacity:.85">
-          <div style="position:absolute;top:10px;right:10px;z-index:2;background:rgba(0,0,0,.7);color:var(--gold);font-size:9px;font-weight:700;letter-spacing:1px;padding:4px 9px;border-radius:10px;text-transform:uppercase">Preview · Coming soon</div>
-          <div style="background:linear-gradient(135deg,#2d0a00,#1a0000);padding:14px 16px">
-            <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px;color:#fff">Fight Night Tulsa · Vol. 1</div>
-            <div style="font-size:11px;color:rgba(255,255,255,.6);font-family:'DM Mono',monospace">SAT · 7:00 PM · Tulsa, OK</div>
-          </div>
-          <div style="padding:14px 16px;background:var(--dark2)">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-              <div style="flex:1;display:flex;align-items:center;gap:8px">
-                <div style="width:38px;height:38px;border-radius:50%;background:rgba(232,37,26,.15);color:var(--red);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:14px">MW</div>
-                <div><div style="font-size:12px;font-weight:600;color:#fff">Fighter A</div><div style="font-size:10px;color:var(--mid);font-family:'DM Mono',monospace">5-1-0</div></div>
-              </div>
-              <div style="font-family:'Bebas Neue',sans-serif;font-size:15px;color:var(--mid)">VS</div>
-              <div style="flex:1;display:flex;align-items:center;gap:8px;flex-direction:row-reverse;text-align:right">
-                <div style="width:38px;height:38px;border-radius:50%;background:rgba(42,127,232,.15);color:var(--blue);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:14px">JT</div>
-                <div><div style="font-size:12px;font-weight:600;color:#fff">Fighter B</div><div style="font-size:10px;color:var(--mid);font-family:'DM Mono',monospace">4-2-0</div></div>
-              </div>
-            </div>
-            <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid var(--dark3);font-size:11px;color:var(--mid)"><span>Welterweight · 147 lbs</span><span style="color:var(--green)">✓ Sanctioned</span></div>
-          </div>
-          <div style="background:var(--dark3);padding:10px 16px;text-align:center;font-size:11px;color:var(--mid)">🎟 Tickets · 📍 Venue details · Full card — all coming soon</div>
-        </div>
-        <div style="font-size:10px;color:var(--mid);text-align:center;margin-top:8px;line-height:1.5">This is a preview of a future feature, not a real event. No live events are scheduled yet.</div>
-      </div>
-
-      <div style="padding:18px 18px;text-align:center">
-        <div style="font-size:12px;color:var(--light);line-height:1.6">In the meantime — post reels, follow people, and chat. That's all live now.</div>
-        <button class="btn-primary" style="margin-top:10px;padding:11px 22px" onclick="setTab('reels')">Go to Reels</button>
-      </div>
+      ${e.description?`<div style="padding:0 18px 14px"><div style="font-size:10px;color:var(--mid);letter-spacing:1px;text-transform:uppercase;font-weight:600;margin-bottom:6px">About</div><div style="font-size:13px;color:var(--light);line-height:1.6;white-space:pre-wrap">${escapeHtml(e.description)}</div></div>`:''}
+      <div style="padding:0 18px 8px;font-size:10px;color:var(--mid)">🎉 Self-posted community event · not verified by RoundUp</div>
+      ${isOwner?`<div style="padding:6px 18px 4px"><button onclick="deleteGeneralEvent('${e.id}')" style="width:100%;background:transparent;color:var(--red);border:1px solid rgba(232,37,26,.3);padding:11px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Delete this event</button></div>`:''}
       <div class="pb-safe"></div>
     </div>`;
 }
+
+async function deleteGeneralEvent(id){
+  if(!confirm('Delete this event? This cannot be undone.'))return;
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {error}=await db.from('events_general').delete().eq('id',id);
+    if(error)throw error;
+    goBack();
+    loadGeneralEvents();
+  }catch(e){console.log('deleteGeneralEvent error:',e&&e.message);alert('Could not delete. Please try again.');}
+}
+
 function getRoleScopedEvents(role){
   let evts=state.events;
   if(role==='creator'||!ROLE_PROFILES[role]?.userId)evts=evts.filter(e=>e.status==='published');
@@ -2674,10 +2849,11 @@ function getRoleScopedEvents(role){
 }
 
 function renderEvents(role){
-  // Everyone is a Creator during the soft launch. Show the "coming soon"
-  // roadmap + a clearly-labeled preview of what sanctioned events will look like.
+  // Creator-role (and any unlicensed) users get real general-event
+  // create/browse, not a placeholder. Fighter/coach/gym/official roles keep
+  // the existing bout-focused experience below, untouched.
   if(role==='creator'||!ROLE_PROFILES[role]?.userId){
-    return renderEventsComingSoon();
+    return renderGeneralEvents();
   }
   const evts=getRoleScopedEvents(role);
   const newCardBtn=role==='gym'?`<div style="padding:14px 18px 0"><button class="btn-primary" style="width:100%;padding:13px;font-size:13px" onclick="openNewCard()">+ Create New Draft Card</button></div>`
