@@ -2301,7 +2301,7 @@ function renderDirectory(){
     return head+`<div class="empty"><div class="empty-icon">🏀</div><div class="empty-title">Court Sports — Coming Soon</div><div class="empty-text">Basketball and Pickleball aren't live on RoundUp yet. Combat sports are fully active — tap "All" or "Fighters" to browse them.</div><button class="empty-btn" onclick="setFindFilter('all')">Back to all members</button></div>`;
   }
   if(filter==='social'){
-    return head+`<div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">Social Events — Coming Soon</div><div class="empty-text">Weddings, reunions, fundraisers, and brand showcases aren't live on RoundUp yet. Combat sports are fully active — tap "All" or "Fighters" to browse them.</div><button class="empty-btn" onclick="setFindFilter('all')">Back to all members</button></div>`;
+    return head+`<div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">Social Events</div><div class="empty-text">Weddings, reunions, fundraisers, and brand showcases are posted in the Events tab, not here — this Find tab is for browsing people. Head to Events to see what's posted.</div><button class="empty-btn" onclick="setTab('events')">Go to Events</button></div>`;
   }
 
   if(state.dirLoading && all.length===0 && gyms.length===0){
