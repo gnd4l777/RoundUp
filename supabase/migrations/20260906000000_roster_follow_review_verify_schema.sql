@@ -269,6 +269,103 @@ alter table public.gyms
   add column if not exists verified_venue boolean not null default false;
 
 -- ----------------------------------------------------------------------------
+-- 5) Column-level privilege lockdown — REVIEWER FIX.
+--
+--    Confirmed problem: gyms already has a live owner-scoped UPDATE policy
+--    (index.html:1214, db.from('gyms').update(fields).eq('id',gymId), scoped
+--    to the owner). RLS is row-level, not column-level, so that policy lets
+--    an owner update ANY column on their own row — including the
+--    verified_venue column added in section 4 above. Once this migration
+--    applied on its own, any gym owner could PATCH their own row with
+--    {"verified_venue": true} and self-award the certification badge, which
+--    defeats the entire point of an admin-set certification (index.html is
+--    full of "Self-listed — not verified by RoundUp" disclaimers this flag is
+--    meant to eventually replace).
+--
+--    Same possible issue, unverified: gym_members.member_role (added in
+--    section 1) might have the identical problem if the live gym_members
+--    UPDATE policy lets a member update their own membership row — a member
+--    could self-promote to 'coach', the exact field that will gate "this
+--    coach's fighters" once built. There is no CREATE TABLE for gym_members
+--    in this repo to check the live policy against, so this is fixed
+--    defensively either way, since the fix pattern is identical and cheap.
+--
+--    Fix pattern for both: REVOKE UPDATE on just the sensitive column (this
+--    blocks it at the grant level regardless of what any row-level policy
+--    otherwise allows — RLS alone cannot express column-level restriction),
+--    plus a SECURITY DEFINER function that performs the actual authorized
+--    write after its own explicit authority check.
+--
+--    ⚠️ ADMIN-CHECK ASSUMPTION — verified, not guessed: index.html itself
+--    (~line 8998-9008) reads profiles.is_admin straight from Supabase after
+--    login and gates window.ruIsAdmin on it ("Real admin gate: if this
+--    account is marked is_admin in Supabase..."), so profiles.is_admin is
+--    confirmed as the real, already-live DB-level admin flag — not a demo/
+--    localStorage-only mechanism, and not an invented convention. The
+--    function below reuses that exact column.
+-- ----------------------------------------------------------------------------
+
+-- Block ordinary clients (owner's own UPDATE policy included) from touching
+-- verified_venue directly, no matter what row-level policy would otherwise
+-- allow on the rest of the row.
+revoke update (verified_venue) on public.gyms from authenticated, anon;
+
+-- Only an admin (profiles.is_admin = true) may flip a gym's certification.
+create or replace function public.admin_set_venue_verification(gym_id uuid, verified boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.profiles
+    where id = auth.uid() and is_admin = true
+  ) then
+    raise exception 'Only an admin can set venue verification.';
+  end if;
+
+  update public.gyms
+    set verified_venue = verified
+    where id = gym_id;
+end;
+$$;
+
+-- Block ordinary clients from self-promoting/demoting their own membership
+-- role, no matter what row-level policy would otherwise allow on the rest of
+-- the gym_members row.
+revoke update (member_role) on public.gym_members from authenticated, anon;
+
+-- Only the owner of the gym a membership belongs to may set that member's
+-- role (a gym owner designating their own coaches is the correct authority
+-- here — unlike venue certification, this doesn't need an admin).
+create or replace function public.set_member_role(membership_id uuid, new_role text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new_role not in ('coach', 'fighter', 'member') then
+    raise exception 'Invalid member_role: %', new_role;
+  end if;
+
+  if not exists (
+    select 1
+    from public.gym_members gm
+    join public.gyms g on g.id = gm.gym_id
+    where gm.id = membership_id and g.owner_id = auth.uid()
+  ) then
+    raise exception 'Only the gym owner can set a member''s role.';
+  end if;
+
+  update public.gym_members
+    set member_role = new_role
+    where id = membership_id;
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
 -- NOT included in this draft, deliberately, as open questions for Kaden:
 --
 -- 1. The follows.followee_id FK-target question flagged at the top of this
@@ -285,4 +382,14 @@ alter table public.gyms
 --    'coach' (so they don't need a separate gym_members row of their own) is
 --    left open — this migration only adds the column and constraint, not
 --    any inference logic connecting gyms.owner_id to gym_members.member_role.
+-- 4. The column-level REVOKEs in section 5 mean the existing index.html
+--    gym-edit call (~line 1214, db.from('gyms').update(fields).eq('id',
+--    gymId)) will silently fail to change verified_venue if `fields` ever
+--    includes it (Postgres raises a permission-denied error on that column,
+--    which .update() surfaces as an error result, not a silent no-op — but
+--    index.html doesn't send verified_venue today, so nothing breaks until
+--    application code is wired to admin_set_venue_verification separately).
+--    Same applies to any existing gym_members update call and member_role.
+--    That wiring (calling the new RPC functions instead of a raw column
+--    update) is separate, later follow-up work, not done in this migration.
 -- ----------------------------------------------------------------------------
