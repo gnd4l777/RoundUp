@@ -1272,7 +1272,7 @@ async function loadGymPage(gymId){
     state.viewGymId=gymId;
     // owner info
     if(state.viewGym){
-      const pr=await db.from('profiles').select('id,display_name,username,avatar_url').eq('id',state.viewGym.owner_id).limit(1);
+      const pr=await db.from('profiles_public').select('id,display_name,username,avatar_url').eq('id',state.viewGym.owner_id).limit(1);
       state.viewGymOwner=(pr.data&&pr.data[0])||null;
       // Load roster: approved (public) + pending (owner sees these).
       const mem=await db.from('gym_members').select('id,user_id,status').eq('gym_id',gymId);
@@ -1280,7 +1280,7 @@ async function loadGymPage(gymId){
       const ids=[...new Set(rows.map(r=>r.user_id))];
       let pmap={};
       if(ids.length){
-        const pp=await db.from('profiles').select('id,display_name,username,avatar_url,role_info').in('id',ids);
+        const pp=await db.from('profiles_public').select('id,display_name,username,avatar_url,role_info').in('id',ids);
         (pp.data||[]).forEach(p=>{pmap[p.id]=p;});
       }
       const withProf=rows.map(r=>({...r,profile:pmap[r.user_id]||null}));
@@ -1362,7 +1362,7 @@ async function loadMyNotifications(){
     const ids=[...new Set(rows.map(r=>r.user_id))];
     let pmap={};
     if(ids.length){
-      const pp=await db.from('profiles').select('id,display_name,username,avatar_url').in('id',ids);
+      const pp=await db.from('profiles_public').select('id,display_name,username,avatar_url').in('id',ids);
       (pp.data||[]).forEach(p=>{pmap[p.id]=p;});
     }
     state.notifPending=rows.map(r=>({...r,profile:pmap[r.user_id]||null,gymName:gymNameById[r.gym_id]||'your gym'}));
@@ -2262,7 +2262,7 @@ function loadDirectory(){
   state.dirError=false;
   // People with a self-listed role (excluding the old 'gym' role — gyms are
   // now their own entity, loaded separately below).
-  db.from('profiles').select('id,display_name,username,avatar_url,role,role_info').not('role','is',null).limit(500)
+  db.from('profiles_public').select('id,display_name,username,avatar_url,role,role_info').not('role','is',null).limit(500)
     .then(function(res){
       state.directory=(res.data||[]).filter(p=>p.role!=='gym');
       state.dirLoading=false;
@@ -2584,7 +2584,7 @@ async function loadInbox(){
     });
     // Look up partner names.
     if(order.length){
-      const pr=await db.from('profiles').select('id,display_name,username').in('id',order);
+      const pr=await db.from('profiles_public').select('id,display_name,username').in('id',order);
       const pmap={}; (pr.data||[]).forEach(p=>{pmap[p.id]=p;});
       order.forEach(id=>{ seen[id].profile=pmap[id]||null; });
     }
@@ -4342,7 +4342,7 @@ async function loadViewProfile(id){
   const db=window.ruDB; if(!db||!id)return;
   state.viewProfileLoading=true;
   try{
-    const pr=await db.from('profiles').select('id,username,display_name,avatar_url,role,role_info').eq('id',id).limit(1);
+    const pr=await db.from('profiles_public').select('id,username,display_name,avatar_url,role,role_info').eq('id',id).limit(1);
     state.viewProfile=(pr.data&&pr.data[0])||null;
     state.viewProfileId=id;
     // Their reels
@@ -4987,7 +4987,7 @@ async function loadDMThread(otherId){
       (rr.data||[]).forEach(r=>{state.dmReelCards[r.id]=r;});
     }
     // Partner profile
-    const pr=await db.from('profiles').select('id,display_name,username').eq('id',otherId).limit(1);
+    const pr=await db.from('profiles_public').select('id,display_name,username').eq('id',otherId).limit(1);
     state.dmThreadProfile=(pr.data&&pr.data[0])||null;
   }catch(e){
     console.log('loadDMThread error:',e&&e.message);
@@ -5038,7 +5038,7 @@ async function openNewDM(){
   if(!user)return;
   let people=[];
   try{
-    const {data}=await db.from('profiles').select('id,display_name,username').neq('id',user.id).limit(200);
+    const {data}=await db.from('profiles_public').select('id,display_name,username').neq('id',user.id).limit(200);
     people=data||[];
   }catch(e){console.log('openNewDM error:',e&&e.message);}
   openActionModal('New Message',
@@ -7644,7 +7644,7 @@ async function loadReelsFromDB(){
     const ids=[...new Set(reels.map(r=>r.author_id).filter(Boolean))];
     let profMap={};
     if(ids.length){
-      const pr=await db.from('profiles').select('id,display_name,username,avatar_url').in('id',ids);
+      const pr=await db.from('profiles_public').select('id,display_name,username,avatar_url').in('id',ids);
       (pr.data||[]).forEach(p=>{profMap[p.id]=p;});
     }
     // Likes: pull all likes for these reels, count them, and mark which ones
@@ -7810,7 +7810,7 @@ async function openShareReel(reelId){
   if(!user){alert('Please log in again.');return;}
   let people=[];
   try{
-    const {data}=await db.from('profiles').select('id,display_name,username').neq('id',user.id).limit(200);
+    const {data}=await db.from('profiles_public').select('id,display_name,username').neq('id',user.id).limit(200);
     people=data||[];
   }catch(e){console.log('openShareReel error:',e&&e.message);}
   openActionModal('Send Reel To…',
@@ -7857,7 +7857,7 @@ async function loadComments(reelId){
     const ids=[...new Set(rows.map(c=>c.author_id).filter(Boolean))];
     let profMap={};
     if(ids.length){
-      const pr=await db.from('profiles').select('id,display_name,username').in('id',ids);
+      const pr=await db.from('profiles_public').select('id,display_name,username').in('id',ids);
       (pr.data||[]).forEach(p=>{profMap[p.id]=p;});
     }
     if(!state.dbComments)state.dbComments={};
