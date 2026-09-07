@@ -38,35 +38,42 @@
 --   3. Grant SELECT on the view to anon/authenticated so those same features
 --      keep working once the base table stops allowing it directly.
 --
--- ⚠️ VERIFY BEFORE APPLYING — POLICY NAME UNKNOWN: I cannot see the live
--- policy definitions currently on `public.profiles` from this session (same
--- limitation flagged in 20260905000000_add_events_tables.sql for `gyms`; no
--- prior migration file exists in this repo for the original CREATE TABLE /
--- CREATE POLICY of `profiles`, so its current policy name is a guess, not a
--- confirmed fact). `drop policy if exists` is a no-op if the name doesn't
--- match, which means the OLD permissive policy could silently remain active
--- side-by-side with the new owner-only one — and Postgres RLS policies are
--- OR'd together, so a leftover permissive policy would completely defeat this
--- fix with no error anywhere. Below, this migration drops every commonly-
--- guessed name for the existing policy, but Kaden MUST open Studio ->
--- Authentication -> Policies -> profiles (or run
--- `select policyname from pg_policies where tablename = 'profiles';`) BEFORE
--- applying this, confirm the real current SELECT policy name(s), and add an
--- explicit `drop policy if exists "<real name>" on public.profiles;` line for
--- any name not already guessed below if needed.
+-- ⚠️ POLICY LOOKUP IS NOW DYNAMIC, NOT GUESSED: earlier drafts of this
+-- migration dropped a hand-guessed list of common policy names (e.g.
+-- `"Public profiles are viewable by everyone"`). That was found to be
+-- unsafe: Supabase's own starter template names this policy
+-- `"Public profiles are viewable by everyone."` — WITH a trailing period —
+-- which the guess list did not include, so it would have silently no-op'd
+-- and left the real leak fully open with no error anywhere. This migration
+-- now queries `pg_policies` directly for every permissive SELECT policy on
+-- `public.profiles` and drops each by its actual name, whatever it is. See
+-- the DO block below.
 --
--- ⚠️⚠️ APPLY TOGETHER WITH THE index.html CHANGES IN THIS SAME PR ⚠️⚠️
--- This is NOT a schema-only, safe-to-apply-early migration like the earlier
--- ones this session (events, roster/follow/review). `profiles` is a real,
--- live table already read by real, shipped features. If this migration is
--- applied WITHOUT also deploying the matching index.html change (repointing
--- every "someone else's profile" read from `profiles` to `profiles_public`),
--- the directory, profile-viewing, gym rosters, and DM contact pickers will
--- ALL break immediately for every real user the moment this migration is
--- applied — they'd suddenly be querying a table they no longer have
--- permission to read other users' rows from, with those UI sections going
--- blank/erroring. Apply the migration and merge/deploy the index.html PR
--- back-to-back, not the migration alone first.
+-- ⚠️⚠️ APPLYING EITHER HALF OF THIS FIX ALONE BREAKS REAL FUNCTIONALITY —
+-- NOT JUST "DOESN'T HELP" — FOR EVERY REAL USER ⚠️⚠️
+-- `profiles` is a real, live table already read by real, shipped features.
+-- These two halves must be deployed back-to-back, not one first and the
+-- other "later":
+--   - Applying this MIGRATION without the matching index.html change: every
+--     "someone else's profile" read still queries `profiles` directly, which
+--     no longer grants that access — the directory, profile pages, gym
+--     rosters, and DM contact pickers all go blank/empty for every user, with
+--     no thrown error anywhere (RLS just filters rows out silently).
+--   - Deploying the index.html CHANGE (pointed at `profiles_public`) without
+--     this migration applied: the view doesn't exist yet, so those same
+--     screens break the same way, just for the opposite reason (querying a
+--     view that isn't there instead of a table that won't return rows).
+-- Both directions fail silently with empty data, not a visible error — so a
+-- partial deploy can look "fine" at a glance while every affected screen is
+-- actually broken for real users. Apply the migration and merge/deploy the
+-- index.html PR together, back-to-back.
+--
+-- After applying this migration, run `notify pgrst, 'reload schema';` (or
+-- simply wait a moment) before spot-checking `profiles_public` — PostgREST
+-- caches the schema and needs to pick up the new view before it will resolve
+-- requests against it. Checking immediately after applying, before the cache
+-- refreshes, can look like the fix failed (404/relation not found) when it
+-- actually just hasn't picked up the new view yet.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -78,24 +85,77 @@
 --    20260906000000_roster_follow_review_verify_schema.sql, which bypass RLS
 --    entirely as security definer and are unaffected by this change).
 -- ----------------------------------------------------------------------------
+-- Guard: if profiles currently has no INSERT/UPDATE policy at all, that
+-- means writes are working today via RLS being disabled entirely (not via a
+-- permissive policy) — in which case flipping RLS on below with only a
+-- SELECT policy would leave zero INSERT/UPDATE coverage and silently break
+-- the post-login profile upsert, profile edits, and role saving. Abort
+-- before enabling RLS if either is missing.
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='profiles' and cmd in ('INSERT','ALL')) then
+    raise exception 'public.profiles has no INSERT policy; enabling RLS would break the post-login profile upsert.';
+  end if;
+  if not exists (select 1 from pg_policies where schemaname='public' and tablename='profiles' and cmd in ('UPDATE','ALL')) then
+    raise exception 'public.profiles has no UPDATE policy; enabling RLS would break profile edits and role saving.';
+  end if;
+end $$;
+
 alter table public.profiles enable row level security;
 
--- Guessed/likely names for whatever permissive policy currently allows
--- anon/authenticated to read every column of every row. Each is a no-op if
--- the name doesn't match — see the VERIFY BEFORE APPLYING warning above.
--- Kaden: confirm the real name in Studio and add it explicitly if it isn't
--- one of these.
-drop policy if exists "profiles_select_own" on public.profiles;
-drop policy if exists "Public profiles are viewable by everyone" on public.profiles;
-drop policy if exists "Enable read access for all users" on public.profiles;
-drop policy if exists "profiles_select_all" on public.profiles;
-drop policy if exists "profiles_select_public" on public.profiles;
-drop policy if exists "Allow public read access" on public.profiles;
-drop policy if exists "select_profiles" on public.profiles;
+-- Dynamically look up and drop every permissive SELECT policy on
+-- public.profiles by its real name, whatever that name actually is — see
+-- the "POLICY LOOKUP IS NOW DYNAMIC" note above for why a guessed name list
+-- is not safe here. Aborts instead of dropping if it finds a permissive
+-- FOR ALL policy, since blind-dropping that would also strip whatever
+-- INSERT/UPDATE/DELETE coverage rides along with it, which isn't this fix's
+-- call to make.
+do $$
+declare
+  names text[];
+  nm text;
+begin
+  select coalesce(array_agg(policyname), '{}')
+    into names
+  from pg_policies
+  where schemaname = 'public' and tablename = 'profiles'
+    and permissive = 'PERMISSIVE' and cmd = 'SELECT';
+
+  foreach nm in array names loop
+    execute format('drop policy %I on public.profiles', nm);
+    raise notice 'Dropped permissive SELECT policy: %', nm;
+  end loop;
+
+  if exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'profiles'
+      and permissive = 'PERMISSIVE' and cmd = 'ALL'
+  ) then
+    raise exception 'public.profiles has a permissive FOR ALL policy that still grants public SELECT. Split it into explicit INSERT/UPDATE/DELETE policies first, then re-run.';
+  end if;
+end $$;
 
 create policy "profiles_select_own"
   on public.profiles for select
   using (auth.uid() = id);
+
+-- Post-condition: confirm no other permissive SELECT/ALL policy survived the
+-- drop loop above (e.g. one created after this migration was drafted, or
+-- named in a way that somehow slipped past the pg_policies query). Postgres
+-- RLS policies are OR'd together, so any leftover permissive read policy
+-- would completely defeat this fix with no error anywhere else.
+do $$
+declare leftover text;
+begin
+  select string_agg(policyname || ' (' || cmd || ')', ', ') into leftover
+  from pg_policies
+  where schemaname = 'public' and tablename = 'profiles'
+    and permissive = 'PERMISSIVE' and cmd in ('SELECT','ALL')
+    and policyname <> 'profiles_select_own';
+  if leftover is not null then
+    raise exception 'Leftover permissive read policy on public.profiles: %', leftover;
+  end if;
+end $$;
 
 -- ----------------------------------------------------------------------------
 -- 2) profiles_public — the only public-facing read surface for OTHER users'
