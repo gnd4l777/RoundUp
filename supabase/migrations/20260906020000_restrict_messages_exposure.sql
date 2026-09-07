@@ -43,23 +43,37 @@
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- 0) Guard before enabling RLS: messages has no UPDATE/DELETE call site
---    anywhere in index.html (DMs are never edited or deleted by any current
---    feature), so — unlike the profiles migration, which had to guard both
---    INSERT and UPDATE because profiles has a real edit/upsert flow — this
---    only needs to guard INSERT. If there's no INSERT policy at all today,
---    that most likely means messages currently allows writes via RLS being
---    disabled entirely (not via a permissive policy), in which case simply
---    enabling RLS with only a SELECT policy below would leave zero INSERT
---    coverage and silently break the ability to send a DM. Abort instead of
---    guessing.
+-- 0) No pre-flight "an INSERT policy must already exist" guard here, and
+--    deliberately so. Earlier drafts of this migration aborted if
+--    public.messages had zero existing INSERT policies, on the reasoning
+--    that "DM-sending works today, so some permissive INSERT policy must
+--    exist." That reasoning doesn't hold: DM-sending working today is
+--    equally (arguably more) consistent with RLS being fully *disabled* on
+--    messages — zero policies of any kind, with Supabase's default
+--    table-level grant letting inserts through regardless of RLS. That is
+--    in fact the single most likely real explanation for the anon-SELECT
+--    leak this migration exists to fix in the first place, since the exact
+--    same "no RLS at all" state also explains unrestricted reads.
+--
+--    Unlike the profiles migration (20260906010000), which does NOT create
+--    its own INSERT policy and so genuinely needs a guard against enabling
+--    RLS with none present, this migration creates its own correct INSERT
+--    policy unconditionally below (`messages_insert_own`, scoped to
+--    auth.uid() = sender_id) regardless of what existed before. So there is
+--    nothing to guard: zero pre-existing policies is a legitimate, expected
+--    starting state — most likely the actual current state in production —
+--    and this migration handles it correctly by simply creating the new
+--    SELECT and INSERT policies below rather than treating it as a failure.
+--
+--    Enabling RLS here is also safe in that "currently disabled, zero
+--    policies" scenario specifically: the messages table is confirmed empty
+--    in production today (see note atop this file — anon SELECT currently
+--    returns `200 []`), so there's no existing row-visibility question to
+--    reason about, and this migration installs both a correct SELECT policy
+--    (participant-only, below) and a correct INSERT policy (own sender_id,
+--    below) in the same transaction as enabling RLS, so nothing is stranded
+--    without coverage at any point after this migration finishes.
 -- ----------------------------------------------------------------------------
-do $$
-begin
-  if not exists (select 1 from pg_policies where schemaname='public' and tablename='messages' and cmd in ('INSERT','ALL')) then
-    raise exception 'public.messages has no INSERT policy; enabling RLS would break the ability to send a DM. Add an INSERT policy first, then re-run.';
-  end if;
-end $$;
 
 alter table public.messages enable row level security;
 
@@ -132,16 +146,15 @@ end $$;
 --    `with check (auth.uid() = sender_id)` policy matches real usage exactly
 --    and breaks nothing legitimate.
 --
---    Reasoning for tightening this now rather than leaving it: the guard in
---    step 0 already proved an INSERT policy exists (or this migration would
---    have aborted before reaching this point) — sends work today, so
---    *something* permissive is allowing them. We can't safely guess what
---    that policy currently checks (or doesn't) without querying it, so this
---    looks it up the same dynamic way as SELECT above rather than assuming.
---    If there's exactly one permissive INSERT policy, replace it with the
---    scoped version. If there's more than one, that's an unexpected shape
---    for this table — abort for manual review rather than guessing which
---    one is "the" policy to replace.
+--    We can't safely guess what any pre-existing INSERT policy checks (or
+--    doesn't) without querying it, so this looks it up the same dynamic way
+--    as SELECT above rather than assuming. Three possible shapes, all
+--    handled: zero permissive INSERT policies (RLS was off, or on with no
+--    INSERT policy at all — the expected case, most likely the real current
+--    state — nothing to drop, just create the scoped policy below), exactly
+--    one (replace it with the scoped version), or more than one (an
+--    unexpected shape for this table — abort for manual review rather than
+--    guessing which one is "the" policy to replace).
 -- ----------------------------------------------------------------------------
 do $$
 declare
@@ -154,12 +167,7 @@ begin
   where schemaname = 'public' and tablename = 'messages'
     and permissive = 'PERMISSIVE' and cmd = 'INSERT';
 
-  if array_length(names, 1) is null then
-    -- Should be unreachable: step 0's guard already required an INSERT (or
-    -- ALL) policy to exist before RLS was enabled. Left in as a defensive
-    -- check in case this migration is ever partially re-run.
-    raise exception 'Expected an existing permissive INSERT policy on public.messages but found none.';
-  elsif array_length(names, 1) > 1 then
+  if array_length(names, 1) > 1 then
     raise exception 'public.messages has more than one permissive INSERT policy (%); resolve manually before scoping INSERT to sender_id.', array_to_string(names, ', ');
   end if;
 
