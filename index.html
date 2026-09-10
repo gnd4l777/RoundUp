@@ -2269,7 +2269,13 @@ function loadDirectory(){
 
 function renderDirectory(){
   if(!window._dirLoaded){ window._dirLoaded=true; setTimeout(loadDirectory,0); }
-  const filter=state.findFilter||'all';
+  // Normalise on read: a returning user (or an async saveState firing while a
+  // now-removed chip was selected) could have an unrecognised value persisted in
+  // localStorage. Treat anything unknown as 'all' so nobody lands on an
+  // unhandled filter that silently shows the wrong list.
+  const VALID_FIND_FILTERS=['all','fighters','gyms','coaches','officials','sponsors','court'];
+  let filter=state.findFilter||'all';
+  if(!VALID_FIND_FILTERS.includes(filter))filter='all';
   const all=state.directory||[];
   const filterMap={all:null,fighters:'fighter',gyms:'gym',coaches:'coach',officials:'official',sponsors:'sponsor'};
   const want=filterMap[filter];
@@ -2279,8 +2285,8 @@ function renderDirectory(){
   const showGyms=(filter==='all'||filter==='gyms');
   const gymsToShow=showGyms?gyms:[];
 
-  const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors'],['court','Court Sports'],['social','Social Events']]
-    .map(([f,lbl])=>`<div class="disco-chip ${filter===f?'active':''}" onclick="setFindFilter('${f}')">${lbl}${(f==='court'||f==='social')?' · soon':''}</div>`).join('');
+  const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors'],['court','Court Sports']]
+    .map(([f,lbl])=>`<div class="disco-chip ${filter===f?'active':''}" onclick="setFindFilter('${f}')">${lbl}${(f==='court')?' · soon':''}</div>`).join('');
 
   const head=`
     <div style="background:rgba(245,166,35,.05);border-bottom:1px solid rgba(245,166,35,.12);padding:8px 18px;font-size:10px;color:var(--gold);line-height:1.4">⏳ Self-listed members · not yet verified by RoundUp</div>
@@ -2290,9 +2296,6 @@ function renderDirectory(){
   // show an honest explanation instead of filtering into an empty state.
   if(filter==='court'){
     return head+`<div class="empty"><div class="empty-icon">🏀</div><div class="empty-title">Court Sports — Coming Soon</div><div class="empty-text">Basketball and Pickleball aren't live on RoundUp yet. Combat sports are fully active — tap "All" or "Fighters" to browse them.</div><button class="empty-btn" onclick="setFindFilter('all')">Back to all members</button></div>`;
-  }
-  if(filter==='social'){
-    return head+`<div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">Social Events</div><div class="empty-text">Weddings, reunions, fundraisers, and brand showcases are posted in the Events tab, not here — this Find tab is for browsing people. Head to Events to see what's posted.</div><button class="empty-btn" onclick="setTab('events')">Go to Events</button></div>`;
   }
 
   if(state.dirLoading && all.length===0 && gyms.length===0){
