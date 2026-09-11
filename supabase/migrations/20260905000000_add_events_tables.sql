@@ -1,7 +1,9 @@
 -- ============================================================================
--- DRAFT MIGRATION — NOT APPLIED. Do not run against production.
--- Written for review only. Kaden applies this himself from his own machine
--- once he's reviewed it (e.g. via `supabase db push` or the Studio SQL editor).
+-- APPLIED IN PRODUCTION as of 2026-09-10 (verified: events_general returns
+-- HTTP 200 via anon probe, not 404). Kept here as the schema-of-record.
+-- If you need to change this table now, write a follow-up ALTER migration
+-- instead of editing this file — see 20260910010000_events_category_drop_wedding_reunion.sql
+-- for an example (the category constraint needed exactly that treatment).
 -- ============================================================================
 --
 -- Purpose: introduce a real `events` schema. Today, all events live only in
@@ -132,7 +134,7 @@ as $$
 $$;
 
 -- ----------------------------------------------------------------------------
--- 1) events_general — non-combat events (weddings, reunions, tournaments, etc.)
+-- 1) events_general — non-combat events (tournaments, leagues, pickup, etc.)
 --    No combat-specific fields. Kept intentionally generic.
 -- ----------------------------------------------------------------------------
 create table if not exists public.events_general (
@@ -142,10 +144,10 @@ create table if not exists public.events_general (
   title text not null,
   description text,
   category text not null default 'other'
-    -- widened to match the "Social Events" copy already shipped in the Find tab
-    -- and Events Coming Soon screen (PR #5, #13), which explicitly promises
-    -- weddings, reunions, fundraisers, and brand showcases as event types.
-    check (category in ('wedding','reunion','tournament','fundraiser','showcase','other')),
+    -- wedding/reunion dropped 2026-09-10 (off the sports-focused roadmap,
+    -- ACTION-NEEDED.md item 4, Option A); pickup added so a casual pickup
+    -- game has a real category instead of being filed as tournament/other.
+    check (category in ('tournament','fundraiser','showcase','pickup','league','other')),
   start_time timestamptz not null,
   end_time timestamptz,
   venue_name text,

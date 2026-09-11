@@ -2593,8 +2593,8 @@ async function loadInbox(){
 
 /* ===== EVENTS ===== */
 // ───── General (non-combat) events — real create + browse + detail ─────
-// Weddings, reunions, tournaments, and other community events. These live in
-// the real `events_general` Supabase table (see
+// Tournaments, leagues, pickup games, fundraisers, and other community
+// events. These live in the real `events_general` Supabase table (see
 // supabase/migrations/20260905000000_add_events_tables.sql), completely
 // separate from the localStorage-only combat bout-card system (state.events /
 // renderEventDetail / openEvent) below — do not mix the two. NOTE: as of this
@@ -2602,12 +2602,13 @@ async function loadInbox(){
 // database yet, so every call below fails gracefully (try/catch + console.log
 // + an honest error state) rather than assuming the table exists.
 //
-// Category dropdown matches the migration's check constraint values, which
-// were widened to wedding/reunion/tournament/fundraiser/showcase/other (see
-// supabase/migrations/20260905000000_add_events_tables.sql) — all 6 values
-// below are valid and an insert with any of them will be accepted.
-const GENERAL_EVENT_CATEGORIES=[['wedding','Wedding'],['reunion','Reunion'],['tournament','Tournament'],['fundraiser','Fundraiser'],['showcase','Showcase'],['other','Other']];
-const GENERAL_EVENT_CATEGORY_LABELS={wedding:'Wedding',reunion:'Reunion',tournament:'Tournament',fundraiser:'Fundraiser',showcase:'Showcase',other:'Other'};
+// Category dropdown matches the migration's check constraint values:
+// tournament/fundraiser/showcase/pickup/league/other (see
+// supabase/migrations/20260905000000_add_events_tables.sql) — Wedding/Reunion
+// were dropped 2026-09-10 (off the sports-focused roadmap) and Pickup/League
+// added so a casual pickup game has a real category instead of "Other".
+const GENERAL_EVENT_CATEGORIES=[['tournament','Tournament'],['fundraiser','Fundraiser'],['showcase','Showcase'],['pickup','Pickup'],['league','League'],['other','Other']];
+const GENERAL_EVENT_CATEGORY_LABELS={tournament:'Tournament',fundraiser:'Fundraiser',showcase:'Showcase',pickup:'Pickup',league:'League',other:'Other'};
 
 function fmtEventDateTime(iso){
   const d=iso?new Date(iso):null;
@@ -2661,14 +2662,14 @@ function renderGeneralEvents(){
   if(!window._geLoaded){ window._geLoaded=true; setTimeout(loadGeneralEvents,0); }
   const evts=state.generalEvents||[];
   const createBtn=`<div style="padding:14px 18px 0"><button class="btn-primary" style="width:100%;padding:13px;font-size:13px" onclick="openGeneralEventForm()">+ Post an Event</button></div>`;
-  const head=`<div style="padding:10px 18px 0"><div style="background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.12);border-radius:var(--r);padding:8px 12px;font-size:10px;color:var(--gold);line-height:1.4">🎉 Weddings, reunions, tournaments & more — self-posted, not verified by RoundUp. Combat sports fight cards are handled separately and aren't live yet.</div></div>`;
+  const head=`<div style="padding:10px 18px 0"><div style="background:rgba(245,166,35,.05);border:1px solid rgba(245,166,35,.12);border-radius:var(--r);padding:8px 12px;font-size:10px;color:var(--gold);line-height:1.4">🎉 Tournaments, leagues, pickup games & more — self-posted, not verified by RoundUp. Combat sports fight cards are handled separately and aren't live yet.</div></div>`;
 
   if(state.generalEventsLoading&&evts.length===0){
     return createBtn+head+`<div class="empty" style="padding:40px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading events…</div></div>`;
   }
   if(evts.length===0){
     if(state.generalEventsError)return createBtn+head+`<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn't load events right now</div><div class="empty-text">Something went wrong loading events. Please try again.</div><button class="empty-btn" onclick="loadGeneralEvents()">Tap to retry</button></div>`;
-    return createBtn+head+`<div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">No events posted yet</div><div class="empty-text">Weddings, reunions, tournaments, and more — be the first to post one.</div></div>`;
+    return createBtn+head+`<div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">No events posted yet</div><div class="empty-text">Tournaments, leagues, pickup games, and more — be the first to post one.</div></div>`;
   }
   return createBtn+head+`<div style="padding:12px 18px 0;display:flex;flex-direction:column;gap:8px">${evts.map(renderGeneralEventCard).join('')}</div><div class="pb-safe"></div>`;
 }
@@ -2683,10 +2684,10 @@ function openGeneralEventForm(){
     <div class="modal" style="text-align:left;max-height:85vh;overflow-y:auto">
       <div class="modal-handle"></div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white)">Post an Event</div>
-      <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">🎉 For weddings, reunions, tournaments, and other community events — not combat-sports fight cards. This posts publicly as soon as you submit it.</div>
+      <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">🎉 For tournaments, leagues, pickup games, and other community events — not combat-sports fight cards. This posts publicly as soon as you submit it.</div>
 
       <label style="${lbl};margin-top:0">Event title <span style="color:var(--red)">*</span></label>
-      <input id="ge_title" type="text" placeholder="e.g. Smith Family Reunion 2026" style="${inp}">
+      <input id="ge_title" type="text" placeholder="e.g. Fall 3v3 Basketball Tournament" style="${inp}">
       <label style="${lbl}">Category</label>
       <select id="ge_category" style="${inp}">
         ${GENERAL_EVENT_CATEGORIES.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}
