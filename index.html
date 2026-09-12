@@ -2583,7 +2583,7 @@ function renderDirectory(){
   // Court / Indoor Sports is a Coming Soon subcategory — no listings yet, so
   // show an honest explanation instead of filtering into an empty state.
   if(filter==='court'){
-    return head+`<div class="empty"><div class="empty-icon">🏀</div><div class="empty-title">Court Sports — Coming Soon</div><div class="empty-text">Basketball and Pickleball aren't live on RoundUp yet. Combat sports are fully active — tap "All" or "Fighters" to browse them.</div><button class="empty-btn" onclick="setFindFilter('all')">Back to all members</button></div>`;
+    return head+`<div class="empty"><div class="empty-icon">🏀</div><div class="empty-title">Court Sports — Coming Soon</div><div class="empty-text">Basketball, Volleyball, Pickleball and more (Futsal, Badminton, Dodgeball) aren't live on RoundUp yet. Combat sports are fully active — tap "All" or "Fighters" to browse them.</div><button class="empty-btn" onclick="setFindFilter('all')">Back to all members</button></div>`;
   }
 
   if(state.dirLoading && all.length===0 && gyms.length===0){
