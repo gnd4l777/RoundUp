@@ -1245,6 +1245,269 @@ async function deleteGym(gymId){
   }catch(e){console.log('delete error:',e);alert('Could not delete. Please try again.');}
 }
 
+// ===== Venues (task 4c, Slice 2) =====
+// Any authenticated user can list a venue — same non-gated pattern as gym
+// creation above, no new profiles.role (VENUE-RENTALS-AND-TAXONOMY-DESIGN.md
+// §1.1 / Part 5). Depends on the `venues`/`venue_spaces` tables from
+// supabase/migrations/20260911000000_add_venue_rental_schema.sql (PR #28) —
+// that migration is a review-only draft as of this writing, not yet applied,
+// so every call below fails soft (try/catch + console.log + an honest error
+// state) exactly like renderGeneralEvents() did before its own table existed.
+const VENUE_SPACE_TYPES=['field','court','turf','mat','ring','cage','lane','rink','studio','room','other'];
+const VENUE_SPACE_TYPE_LABELS={field:'Field',court:'Court',turf:'Turf',mat:'Mat',ring:'Ring',cage:'Cage',lane:'Lane',rink:'Rink',studio:'Studio',room:'Room',other:'Other'};
+
+async function loadMyVenues(){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user)return;
+  try{
+    const {data}=await db.from('venues').select('*').eq('owner_id',user.id).order('created_at',{ascending:true});
+    state.myVenues=data||[];
+    if(state.currentTab==='profile')render();
+  }catch(e){console.log('loadMyVenues error:',e&&e.message);}
+}
+
+// Create or edit a venue (the business). Pass a venue id to edit, or nothing
+// to create. Mirrors openGymForm()'s modal pattern.
+function openVenueForm(venueId){
+  closeProfileMenu();
+  let venue={name:'',city:'',region:'',address:'',contact:'',description:''};
+  if(venueId){const v=(state.myVenues||[]).find(x=>x.id===venueId);if(v)venue=v;}
+  let m=document.getElementById('ruVenueForm');
+  if(!m){m=document.createElement('div');m.id='ruVenueForm';m.className='modal-bg';m.onclick=function(e){if(e.target===m)m.style.display='none';};document.body.appendChild(m);}
+  const inp='width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:\'DM Sans\',sans-serif;margin-top:5px;box-sizing:border-box';
+  const lbl='font-size:12px;color:var(--mid);display:block;margin-top:10px';
+  m.innerHTML=`
+    <div class="modal" style="text-align:left;max-height:85vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white)">${venueId?'Edit Venue':'List a Venue'}</div>
+      <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">🏟 This is your venue's page — you own and control it. Self-listed; not verified by RoundUp until an admin verifies specific spaces for specific sports.</div>
+
+      <label style="${lbl};margin-top:0">Venue name <span style="color:var(--red)">*</span></label>
+      <input id="vf_name" type="text" value="${(venue.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. Soccer City Tulsa" style="${inp}">
+      <label style="${lbl}">City <span style="color:var(--red)">*</span></label>
+      <input id="vf_city" type="text" value="${(venue.city||'').replace(/"/g,'&quot;')}" placeholder="Tulsa" style="${inp}">
+      <label style="${lbl}">Region / state (optional)</label>
+      <input id="vf_region" type="text" value="${(venue.region||'').replace(/"/g,'&quot;')}" placeholder="OK" style="${inp}">
+      <label style="${lbl}">Street address (optional)</label>
+      <input id="vf_address" type="text" value="${(venue.address||'').replace(/"/g,'&quot;')}" placeholder="123 Main St, Tulsa, OK 74103" style="${inp}">
+      <label style="${lbl}">Contact (phone / email / IG — optional)</label>
+      <input id="vf_contact" type="text" value="${(venue.contact||'').replace(/"/g,'&quot;')}" placeholder="(918) 555-0123 · @yourvenue" style="${inp}">
+      <label style="${lbl}">About the venue (optional)</label>
+      <textarea id="vf_description" rows="3" placeholder="Tell people what you offer, hours, parking..." style="${inp};resize:vertical">${escapeHtml(venue.description||'')}</textarea>
+
+      <div id="vfMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
+      <button id="vfSaveBtn" onclick="saveVenue('${venueId||''}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">${venueId?'Save changes':'Create venue'}</button>
+      ${venueId?`<button onclick="deleteVenue('${venueId}')" style="width:100%;background:transparent;color:var(--red);border:none;padding:9px;font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:4px">Delete this venue</button>`:''}
+      <button onclick="document.getElementById('ruVenueForm').style.display='none'" style="width:100%;background:transparent;color:var(--mid);border:none;padding:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:2px">Cancel</button>
+    </div>`;
+  m.style.display='flex';
+}
+
+async function saveVenue(venueId){
+  const db=window.ruDB; if(!db){alert('Not connected.');return;}
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  const name=(document.getElementById('vf_name').value||'').trim();
+  const city=(document.getElementById('vf_city').value||'').trim();
+  const region=(document.getElementById('vf_region').value||'').trim();
+  const address=(document.getElementById('vf_address').value||'').trim();
+  const contact=(document.getElementById('vf_contact').value||'').trim();
+  const description=(document.getElementById('vf_description').value||'').trim();
+  const msg=document.getElementById('vfMsg');
+  const btn=document.getElementById('vfSaveBtn');
+  if(!name){msg.textContent='Please enter a venue name.';return;}
+  if(!city){msg.textContent='Please enter a city.';return;}
+  btn.disabled=true;btn.textContent='Saving…';
+  try{
+    const fields={name:name,city:city,region:region,address:address,contact:contact,description:description};
+    let theId=venueId;
+    if(venueId){
+      const {error}=await db.from('venues').update(fields).eq('id',venueId);
+      if(error)throw error;
+    }else{
+      const ins=await db.from('venues').insert({owner_id:user.id,...fields}).select('id').limit(1);
+      if(ins.error)throw ins.error;
+      theId=ins.data&&ins.data[0]&&ins.data[0].id;
+    }
+    const vm=document.getElementById('ruVenueForm'); if(vm)vm.style.display='none';
+    await loadMyVenues();
+    if(state.currentScreen==='venue_page'&&theId)loadVenuePage(theId);
+    render();
+    if(!venueId&&theId)openVenuePage(theId);
+    else alert('Venue saved!');
+  }catch(e){
+    console.log('saveVenue error:',e&&e.message);
+    msg.textContent='Could not save. If this is the first time anyone has done this, the venue tables may not be live yet — check with Kaden.';
+    btn.disabled=false;btn.textContent=venueId?'Save changes':'Create venue';
+  }
+}
+
+async function deleteVenue(venueId){
+  if(!confirm('Delete this venue? This cannot be undone.'))return;
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {error}=await db.from('venues').delete().eq('id',venueId);
+    if(error)throw error;
+    const vm=document.getElementById('ruVenueForm'); if(vm)vm.style.display='none';
+    await loadMyVenues();
+    if(state.currentScreen==='venue_page')goBack();
+    render();
+  }catch(e){console.log('deleteVenue error:',e);alert('Could not delete. Please try again.');}
+}
+
+// Open a venue's public page.
+function openVenuePage(venueId){if(typeof stopAllReelVideos==='function')stopAllReelVideos();
+  state.currentScreen='venue_page';
+  state.drilldown=venueId;
+  state.viewVenueId=null; state.viewVenue=null; state.viewVenueSpaces=[];
+  saveState();render();
+  setTimeout(()=>loadVenuePage(venueId),0);
+}
+
+async function loadVenuePage(venueId){
+  const db=window.ruDB; if(!db||!venueId)return;
+  state.viewVenueLoading=true;
+  try{
+    const v=await db.from('venues').select('*').eq('id',venueId).limit(1);
+    state.viewVenue=(v.data&&v.data[0])||null;
+    state.viewVenueId=venueId;
+    if(state.viewVenue){
+      const pr=await db.from('profiles_public').select('id,display_name,username,avatar_url').eq('id',state.viewVenue.owner_id).limit(1);
+      state.viewVenueOwner=(pr.data&&pr.data[0])||null;
+      const sp=await db.from('venue_spaces').select('*').eq('venue_id',venueId).order('created_at',{ascending:true});
+      state.viewVenueSpaces=sp.data||[];
+    }
+  }catch(e){console.log('loadVenuePage error:',e&&e.message);}
+  state.viewVenueLoading=false;
+  if(state.currentScreen==='venue_page'&&state.drilldown===venueId)render();
+}
+
+// Add a rentable space under a venue ("Field 3", "Ring 1"). Owner only.
+function openVenueSpaceForm(venueId){
+  let m=document.getElementById('ruVenueSpaceForm');
+  if(!m){m=document.createElement('div');m.id='ruVenueSpaceForm';m.className='modal-bg';m.onclick=function(e){if(e.target===m)m.style.display='none';};document.body.appendChild(m);}
+  const inp='width:100%;background:var(--dark);border:1px solid var(--dark3);border-radius:10px;padding:11px;color:var(--white);font-size:14px;font-family:\'DM Sans\',sans-serif;margin-top:5px;box-sizing:border-box';
+  const lbl='font-size:12px;color:var(--mid);display:block;margin-top:10px';
+  m.innerHTML=`
+    <div class="modal" style="text-align:left;max-height:85vh;overflow-y:auto">
+      <div class="modal-handle"></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white)">Add a Space</div>
+      <label style="${lbl};margin-top:0">Space name <span style="color:var(--red)">*</span></label>
+      <input id="vsf_name" type="text" placeholder="e.g. Field 3, Ring 1, Court A" style="${inp}">
+      <label style="${lbl}">Space type <span style="color:var(--red)">*</span></label>
+      <select id="vsf_type" style="${inp}">
+        ${VENUE_SPACE_TYPES.map(t=>`<option value="${t}">${VENUE_SPACE_TYPE_LABELS[t]}</option>`).join('')}
+      </select>
+      <label style="${lbl}">Capacity (optional)</label>
+      <input id="vsf_capacity" type="number" min="0" placeholder="e.g. 14" style="${inp}">
+      <label style="${lbl}">Default price (optional)</label>
+      <input id="vsf_price" type="number" min="0" placeholder="e.g. 120" style="${inp}">
+      <label style="${lbl}">What's included (optional)</label>
+      <input id="vsf_inclusions" type="text" placeholder="Lights, goals, locker rooms, scoreboard..." style="${inp}">
+      <div style="font-size:10px;color:var(--mid);line-height:1.5;background:rgba(42,127,232,.06);border:1px solid rgba(42,127,232,.2);border-radius:6px;padding:8px;margin-top:10px">A space isn't verified for any sport until an admin sets that — unverified spaces still show here, they just won't appear in the event-creation venue picker yet.</div>
+      <div id="vsfMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
+      <button id="vsfSaveBtn" onclick="saveVenueSpace('${venueId}')" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">Add space</button>
+      <button onclick="document.getElementById('ruVenueSpaceForm').style.display='none'" style="width:100%;background:transparent;color:var(--mid);border:none;padding:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:2px">Cancel</button>
+    </div>`;
+  m.style.display='flex';
+}
+
+async function saveVenueSpace(venueId){
+  const db=window.ruDB; if(!db){alert('Not connected.');return;}
+  const name=(document.getElementById('vsf_name').value||'').trim();
+  const spaceType=document.getElementById('vsf_type').value;
+  const capacity=parseInt(document.getElementById('vsf_capacity').value)||null;
+  const price=parseFloat(document.getElementById('vsf_price').value)||null;
+  const inclusionsRaw=(document.getElementById('vsf_inclusions').value||'').trim();
+  const inclusions=inclusionsRaw?inclusionsRaw.split(',').map(s=>s.trim()).filter(Boolean):[];
+  const msg=document.getElementById('vsfMsg');
+  const btn=document.getElementById('vsfSaveBtn');
+  if(!name){msg.textContent='Please enter a space name.';return;}
+  btn.disabled=true;btn.textContent='Saving…';
+  try{
+    const {error}=await db.from('venue_spaces').insert({
+      venue_id:venueId,name:name,space_type:spaceType,capacity:capacity,
+      default_price:price,inclusions:inclusions
+    });
+    if(error)throw error;
+    const vsm=document.getElementById('ruVenueSpaceForm'); if(vsm)vsm.style.display='none';
+    await loadVenuePage(venueId);
+  }catch(e){
+    console.log('saveVenueSpace error:',e&&e.message);
+    msg.textContent='Could not save. If this is the first time anyone has done this, the venue tables may not be live yet — check with Kaden.';
+    btn.disabled=false;btn.textContent='Add space';
+  }
+}
+
+async function deleteVenueSpace(spaceId, venueId){
+  if(!confirm('Remove this space?'))return;
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {error}=await db.from('venue_spaces').delete().eq('id',spaceId);
+    if(error)throw error;
+    await loadVenuePage(venueId);
+  }catch(e){console.log('deleteVenueSpace error:',e);alert('Could not remove. Please try again.');}
+}
+
+function renderVenuePage(){
+  const id=state.drilldown;
+  if(state.viewVenueId!==id && !state.viewVenueLoading){setTimeout(()=>loadVenuePage(id),0);}
+  const v=(state.viewVenueId===id)?state.viewVenue:null;
+  const myId=window.ruUserId||null;
+
+  if(state.viewVenueLoading && !v){
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Venue</div><div style="width:38px"></div></div><div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading venue…</div></div>`;
+  }
+  if(!v){
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Venue</div><div style="width:38px"></div></div><div class="empty"><div class="empty-icon">🏟</div><div class="empty-title">Venue not found</div><div class="empty-text">It may not exist yet, or the venue tables haven't been applied to the database yet.</div></div>`;
+  }
+  const isOwner=(v.owner_id===myId);
+  const owner=state.viewVenueOwner;
+  const ownerName=escapeHtml(owner?(owner.display_name||owner.username||'Owner'):'Owner');
+  const spaces=state.viewVenueSpaces||[];
+  const cityLine=[v.city,v.region].filter(Boolean).join(', ');
+
+  return `
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Venue</div><div style="width:38px"></div></div>
+    <div class="inner-scroll">
+      <div style="padding:24px 18px 16px;text-align:center;background:linear-gradient(180deg,rgba(42,127,232,.08),transparent)">
+        ${v.photo_url?`<img src="${safeUrl(v.photo_url)}" style="width:84px;height:84px;border-radius:18px;object-fit:cover;margin:0 auto 12px;display:block">`:`<div style="width:84px;height:84px;border-radius:18px;background:rgba(42,127,232,.15);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:38px;margin:0 auto 12px">🏟</div>`}
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;color:var(--white);line-height:1">${escapeHtml(v.name)}</div>
+        ${cityLine?`<div style="font-size:13px;color:var(--lighter);margin-top:4px">📍 ${escapeHtml(cityLine)}</div>`:''}
+        <div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:var(--dark3);padding:4px 12px;border-radius:12px"><span style="font-size:11px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:.5px">Venue</span><span style="font-size:9px;color:var(--mid)">● self-listed, not verified by RoundUp</span></div>
+        ${isOwner?`<div style="margin-top:14px"><button onclick="openVenueForm('${v.id}')" style="background:var(--dark3);color:var(--white);border:none;padding:9px 26px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Edit venue</button></div>`:''}
+      </div>
+
+      ${v.description?`<div class="sec-head"><div class="sec-title">About</div></div><div style="margin:0 18px 8px;font-size:13px;color:var(--lighter);line-height:1.6">${escapeHtml(v.description)}</div>`:''}
+
+      <div class="sec-head"><div class="sec-title">Details</div></div>
+      <div style="margin:0 18px 8px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:4px 14px">
+        ${v.address?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3);gap:12px"><span style="font-size:12px;color:var(--mid);white-space:nowrap">Address</span><span style="font-size:13px;color:var(--white);font-weight:500;text-align:right">${escapeHtml(v.address)}</span></div>`:''}
+        ${v.contact?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3);gap:12px"><span style="font-size:12px;color:var(--mid);white-space:nowrap">Contact</span><span style="font-size:13px;color:var(--white);font-weight:500;text-align:right">${escapeHtml(v.contact)}</span></div>`:''}
+        <div style="display:flex;justify-content:space-between;padding:9px 0"><span style="font-size:12px;color:var(--mid)">Owner</span><span onclick="openUserProfile('${v.owner_id}')" style="font-size:13px;color:var(--gold);font-weight:500;cursor:pointer">${ownerName} ›</span></div>
+      </div>
+
+      <div class="sec-head"><div class="sec-title">Rentable Spaces</div></div>
+      <div style="margin:0 18px 18px">
+        ${spaces.length===0?`<div style="font-size:11px;color:var(--mid);text-align:center;padding:8px 14px;line-height:1.5">${isOwner?'No spaces listed yet. Add one below — a field, court, ring, or room people can eventually request to rent.':'No spaces listed yet.'}</div>`:
+          spaces.map(s=>{
+            const verified=(s.verified_sports&&s.verified_sports.length>0);
+            return `<div style="display:flex;align-items:center;gap:10px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:600;color:var(--white)">${escapeHtml(s.name)}</div>
+                <div style="font-size:10px;color:var(--mid)">${VENUE_SPACE_TYPE_LABELS[s.space_type]||s.space_type}${s.capacity?' · cap. '+s.capacity:''}${s.default_price?' · $'+s.default_price:''}</div>
+                <div style="font-size:10px;color:${verified?'var(--green)':'var(--gold)'};margin-top:2px">${verified?'✓ Verified for: '+s.verified_sports.join(', '):'⏳ Not yet verified for any sport'}</div>
+              </div>
+              ${isOwner?`<button onclick="deleteVenueSpace('${s.id}','${v.id}')" style="background:transparent;border:none;color:var(--mid);font-size:11px;cursor:pointer">Remove</button>`:''}
+            </div>`;
+          }).join('')}
+        ${isOwner?`<button onclick="openVenueSpaceForm('${v.id}')" style="width:100%;background:var(--dark3);border:1px dashed var(--dark5);color:var(--lighter);padding:11px;border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:4px">+ Add a Space</button>`:''}
+      </div>
+      <div class="pb-safe"></div>
+    </div>`;
+}
+
 // Open a gym's public page.
 function openGymPage(gymId){if(typeof stopAllReelVideos==='function')stopAllReelVideos();
   state.currentScreen='gym_page';
@@ -1842,6 +2105,8 @@ function render(){
     wrap.innerHTML=renderProfileDetail();
   }else if(state.currentScreen==='gym_page'){
     wrap.innerHTML=renderGymPage();
+  }else if(state.currentScreen==='venue_page'){
+    wrap.innerHTML=renderVenuePage();
   }else if(state.currentScreen==='event_detail'){
     wrap.innerHTML=renderEventDetail();
   }else if(state.currentScreen==='general_event_detail'){
@@ -2265,6 +2530,12 @@ function loadDirectory(){
       state.dirGyms=res.data||[];
       if(state.currentTab==='find')render();
     }).catch(function(e){state.dirError=true;console.log('loadDirectory gyms error:',e&&e.message);if(state.currentTab==='find')render();});
+  // Real venue entities (task 4c) — fails soft until the venue tables exist.
+  db.from('venues').select('id,name,city,region,owner_id').limit(500)
+    .then(function(res){
+      state.dirVenues=res.data||[];
+      if(state.currentTab==='find')render();
+    }).catch(function(e){console.log('loadDirectory venues error:',e&&e.message);if(state.currentTab==='find')render();});
 }
 
 function renderDirectory(){
@@ -2273,7 +2544,7 @@ function renderDirectory(){
   // now-removed chip was selected) could have an unrecognised value persisted in
   // localStorage. Treat anything unknown as 'all' so nobody lands on an
   // unhandled filter that silently shows the wrong list.
-  const VALID_FIND_FILTERS=['all','fighters','gyms','coaches','officials','sponsors','court'];
+  const VALID_FIND_FILTERS=['all','fighters','gyms','venues','coaches','officials','sponsors','court'];
   let filter=state.findFilter||'all';
   if(!VALID_FIND_FILTERS.includes(filter))filter='all';
   const all=state.directory||[];
@@ -2284,8 +2555,12 @@ function renderDirectory(){
   const gyms=state.dirGyms||[];
   const showGyms=(filter==='all'||filter==='gyms');
   const gymsToShow=showGyms?gyms:[];
+  // Real venue entities (task 4c) — same "own entity, not a role" pattern as gyms.
+  const venues=state.dirVenues||[];
+  const showVenues=(filter==='all'||filter==='venues');
+  const venuesToShow=showVenues?venues:[];
 
-  const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors'],['court','Court Sports']]
+  const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['venues','Venues'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors'],['court','Court Sports']]
     .map(([f,lbl])=>`<div class="disco-chip ${filter===f?'active':''}" onclick="setFindFilter('${f}')">${lbl}${(f==='court')?' · soon':''}</div>`).join('');
 
   const head=`
@@ -2307,7 +2582,11 @@ function renderDirectory(){
       if(state.dirError)return head+`<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn't load gyms</div><div class="empty-text">Something went wrong loading the directory.</div><button class="empty-btn" onclick="loadDirectory()">Tap to retry</button></div>`;
       return head+`<div class="empty"><div class="empty-icon">🏋</div><div class="empty-title">No gyms yet</div><div class="empty-text">No gyms have been created yet. Create one from your Profile to be the first.</div><button class="empty-btn" onclick="setTab('profile')">Create a gym</button></div>`;
     }
-  } else if(list.length===0 && gymsToShow.length===0){
+  } else if(filter==='venues'){
+    if(venuesToShow.length===0){
+      return head+`<div class="empty"><div class="empty-icon">🏟</div><div class="empty-title">No venues yet</div><div class="empty-text">No venues have been listed yet. List one from your Profile to be the first.</div><button class="empty-btn" onclick="setTab('profile')">List a venue</button></div>`;
+    }
+  } else if(list.length===0 && gymsToShow.length===0 && venuesToShow.length===0){
     if(state.dirError)return head+`<div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">Couldn't load</div><div class="empty-text">Something went wrong loading the directory.</div><button class="empty-btn" onclick="loadDirectory()">Tap to retry</button></div>`;
     return head+`<div class="empty"><div class="empty-icon">🔎</div><div class="empty-title">Nobody here yet</div><div class="empty-text">No one has listed themselves${want?(' as a '+want):''} yet. Add your own role from your Profile to be the first.</div><button class="empty-btn" onclick="setTab('profile')">Set my role</button></div>`;
   }
@@ -2346,12 +2625,26 @@ function renderDirectory(){
       </div>`;
   };
 
+  const venueCard=(v)=>{
+    const sub=[v.city,v.region].filter(Boolean).join(', ');
+    return `
+      <div onclick="openVenuePage('${v.id}')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
+        <div style="width:44px;height:44px;border-radius:12px;background:rgba(42,127,232,.15);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">🏟</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${escapeHtml(v.name)}</span><span style="font-size:9px;color:var(--blue);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Venue</span></div>
+          <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(sub||'Self-listed venue')}</div>
+        </div>
+        <span style="color:var(--mid);font-size:16px">›</span>
+      </div>`;
+  };
+
   return `
     <div class="search-bar"><span style="font-size:14px">🔎</span><input class="search-input" placeholder="Browse RoundUp members..."></div>
     ${head}
     <div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px">
       ${gymsToShow.map(gymCard).join('')}
-      ${filter==='gyms'?'':list.map(card).join('')}
+      ${venuesToShow.map(venueCard).join('')}
+      ${(filter==='gyms'||filter==='venues')?'':list.map(card).join('')}
     </div>
     <div class="pb-safe"></div>`;
 }
@@ -4005,6 +4298,21 @@ function renderCreatorProfile(){
             <button onclick="openGymPage('${g.id}')" style="background:transparent;border:1px solid var(--gold);color:var(--gold);padding:5px 12px;border-radius:10px;font-size:10px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Open</button>
           </div>`).join('')}
         <button onclick="openGymForm()" style="background:var(--dark3);border:1px dashed var(--dark5);color:var(--lighter);padding:11px;border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">+ Create a gym page</button>
+      </div>
+
+      <!-- ── MY VENUES (any user can list one — a rentable space business, separate from a gym) ── -->
+      <div class="sec-head" style="margin-top:6px"><div class="sec-title">My Venues</div></div>
+      <div style="padding:0 18px;margin-bottom:4px;font-size:11px;color:var(--mid);line-height:1.5">
+        A venue is a rentable space — a field, court, ring, or room. List one and add its spaces; other RoundUp members will eventually be able to request to rent them.
+      </div>
+      <div id="myVenuesList" style="padding:0 18px;display:flex;flex-direction:column;gap:8px;margin-bottom:10px">
+        ${(state.myVenues||[]).map(v=>`
+          <div style="display:flex;align-items:center;gap:10px;background:rgba(42,127,232,.06);border:1px solid rgba(42,127,232,.25);border-radius:var(--r);padding:11px 14px">
+            <span style="font-size:16px">🏟</span>
+            <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--white)">${escapeHtml(v.name)}</div><div style="font-size:11px;color:var(--mid)">${escapeHtml([v.city,v.region].filter(Boolean).join(', '))}</div></div>
+            <button onclick="openVenuePage('${v.id}')" style="background:transparent;border:1px solid var(--blue);color:var(--blue);padding:5px 12px;border-radius:10px;font-size:10px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Open</button>
+          </div>`).join('')}
+        <button onclick="openVenueForm()" style="background:var(--dark3);border:1px dashed var(--dark5);color:var(--lighter);padding:11px;border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">+ List a venue</button>
       </div>
 
       <!-- ── MY TICKETS ── -->
@@ -9435,6 +9743,7 @@ render();
         }
       }).catch(function(e){console.log('profile load skipped:',e&&e.message);});
       if(typeof loadMyGyms==='function')setTimeout(loadMyGyms,100);
+      if(typeof loadMyVenues==='function')setTimeout(loadMyVenues,100);
       if(typeof loadMyNotifications==='function')setTimeout(loadMyNotifications,300);
       // Push the real name into local state so the UI shows it everywhere.
       try{
