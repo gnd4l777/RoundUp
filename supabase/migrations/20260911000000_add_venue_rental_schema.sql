@@ -78,6 +78,12 @@ create table if not exists public.venues (
   description text,
   contact text,
   photo_url text,
+  -- Kaden approved 2026-09-13 (round-3 review, new item): a venue with any
+  -- rental agreement history used to hit a hard `raise exception` on delete
+  -- with literally no way to remove it from public browse ever (see the old
+  -- venues_block_delete_with_history comment below, now superseded). Adding
+  -- is_active mirrors venue_spaces' existing soft-delete column exactly.
+  is_active boolean not null default true,
   created_at timestamptz not null default now()
   -- Deliberately no reputation/score column and no top-level verified flag —
   -- verification lives per-space, per-sport (venue_spaces.verified_sports
@@ -90,10 +96,13 @@ alter table public.venues enable row level security;
 
 -- Self-listed and unverified at launch, same disclaimer pattern as gyms
 -- (index.html:1149) — so browsing is public, same as the gym directory.
+-- Public browsing only sees active venues (mirrors venue_spaces_select_public
+-- below); the owner can still see their own inactive venues so they can
+-- manage/reactivate them.
 drop policy if exists "venues_select_public" on public.venues;
 create policy "venues_select_public"
   on public.venues for select
-  using (true);
+  using (is_active or auth.uid() = owner_id);
 
 drop policy if exists "venues_insert_own" on public.venues;
 create policy "venues_insert_own"
@@ -137,17 +146,13 @@ as $$
 $$;
 
 -- ----------------------------------------------------------------------------
--- Item 8, venues half: venues has no is_active column (unlike venue_spaces),
--- and this task deliberately does not add one — only reuse an existing
--- column. So a hard DELETE of a venue that still has agreement history
--- (rental_agreements.venue_id) can't be silently converted to a soft delete
--- the way venue_spaces is below; instead this trigger turns the raw 23503
--- foreign-key error into a clear, catchable application error before
--- Postgres ever gets to the FK check, telling the owner to deactivate their
--- spaces individually instead (which the venue_spaces trigger below
--- supports). ASSUMPTION FLAG: if Kaden wants venues to soft-delete the same
--- way spaces do, that needs a follow-up migration adding is_active to
--- venues — out of scope here per the "don't add a new column" instruction.
+-- Item 8, venues half (superseded 2026-09-13 by the new is_active column
+-- above): this trigger used to `raise exception` outright on any delete of a
+-- venue with agreement history, since venues previously had no soft-delete
+-- column to fall back on — that left a venue with any rental history with
+-- literally no way to be removed from public browse. Now that venues has its
+-- own is_active column, this converts the delete into is_active = false
+-- instead, the exact same pattern as venue_spaces_soft_delete below.
 -- confirm_rental() always keeps rental_agreements.venue_id consistent with
 -- the confirmed space's parent venue, so checking venue_id here directly is
 -- equivalent to (and simpler than) checking through every child space.
@@ -159,9 +164,10 @@ set search_path = public
 as $$
 begin
   if exists (select 1 from public.rental_agreements where venue_id = old.id) then
-    raise exception 'Cannot delete a venue that has rental agreement history — deactivate its spaces individually instead.';
+    update public.venues set is_active = false where id = old.id;
+    return null; -- cancel the actual DELETE
   end if;
-  return old;
+  return old; -- no history — hard delete proceeds
 end;
 $$;
 
@@ -169,6 +175,38 @@ drop trigger if exists venues_block_delete_with_history_trg on public.venues;
 create trigger venues_block_delete_with_history_trg
   before delete on public.venues
   for each row execute function public.venues_block_delete_with_history();
+
+-- ----------------------------------------------------------------------------
+-- Round-3 review non-blocking 4: nothing previously stopped a venue owner
+-- from setting gym_id to ANY gym's id, including one they don't own. Nothing
+-- reads this column yet so it's harmless today, but leaving it unchecked
+-- would let it silently misrepresent an affiliation the moment something
+-- does read it (e.g. showing "affiliated with [gym]" on a venue page). Gym
+-- ownership is public.gyms.owner_id (see index.html's gym queries, e.g.
+-- `.from('gyms').select('*').eq('owner_id', user.id)`) — gyms has no
+-- separate staff/team table to consult, so this is a direct ownership match,
+-- same shape as user_can_manage_venue above.
+-- ----------------------------------------------------------------------------
+create or replace function public.venues_validate_gym_affiliation()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.gym_id is not null and not exists (
+    select 1 from public.gyms g where g.id = new.gym_id and g.owner_id = new.owner_id
+  ) then
+    raise exception 'gym_id must reference a gym you own.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists venues_validate_gym_affiliation_trg on public.venues;
+create trigger venues_validate_gym_affiliation_trg
+  before insert or update of gym_id, owner_id on public.venues
+  for each row execute function public.venues_validate_gym_affiliation();
 
 -- ----------------------------------------------------------------------------
 -- 2) venue_spaces — one rentable unit under a venue ("Field 3", "Ring 1").
@@ -445,7 +483,11 @@ create table if not exists public.rental_requests (
   venue_confirmed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  check (proposed_ends_at > proposed_starts_at)
+  check (proposed_ends_at > proposed_starts_at),
+  -- Round-3 review non-blocking 3: nothing previously stopped payer and
+  -- payee from both being 'renter' or both 'venue' — a nonsensical term that
+  -- would then get frozen verbatim into rental_agreements below.
+  check (proposed_payer <> proposed_payee)
 );
 
 create index if not exists rental_requests_space_id_idx on public.rental_requests(space_id);
@@ -456,20 +498,41 @@ create index if not exists rental_requests_event_id_idx on public.rental_request
 -- Force venue_owner_id to the space's real owner on every insert/update,
 -- regardless of what the client sends. This is what makes venue_owner_id
 -- safe to use in RLS below.
+--
+-- Round-3 review non-blocking 2: is_active was already checked at insert
+-- time (rental_requests_insert_renter policy below) and again inside
+-- confirm_rental(), but a renter could still repoint an existing request's
+-- space_id at a space that's since been soft-deleted via UPDATE, since
+-- nothing re-checked is_active on that path. This trigger already fires on
+-- `before insert or update of space_id, venue_owner_id` (item 4), and
+-- venue_owner_id is withheld from the client's update-column grant below, so
+-- in practice a client-driven fire of this trigger only ever happens when
+-- space_id is being set (insert) or actually changed (update) — exactly the
+-- moment a fresh is_active check is needed. Folding the check in here means
+-- an update that leaves space_id untouched (e.g. declining or cancelling a
+-- request against a space that went inactive after the request was made)
+-- is unaffected — only an attempt to point at a *different*, inactive space
+-- is blocked.
 create or replace function public.rental_requests_set_venue_owner()
 returns trigger
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  space_active boolean;
 begin
-  select v.owner_id into new.venue_owner_id
+  select v.owner_id, s.is_active into new.venue_owner_id, space_active
     from public.venue_spaces s
     join public.venues v on v.id = s.venue_id
     where s.id = new.space_id;
 
   if new.venue_owner_id is null then
     raise exception 'venue space % has no resolvable owner', new.space_id;
+  end if;
+
+  if not space_active then
+    raise exception 'This space is no longer available and cannot be assigned to a rental request.';
   end if;
 
   return new;
@@ -499,6 +562,20 @@ create trigger rental_requests_set_venue_owner_trg
 -- again on the new terms. Keep this list explicit — extend it whenever a
 -- new negotiable term column is added (e.g. the item 7 columns are already
 -- included below).
+--
+-- Round-3 review finding A: this list previously missed price_notes,
+-- inclusions_requested, and setup_teardown_note — all three ARE frozen into
+-- rental_agreements by confirm_rental() below (as payment_terms_text,
+-- inclusions, and setup_teardown_terms respectively), so leaving them out of
+-- this watch list let one party silently change them after the other had
+-- already confirmed: venue confirms -> renter edits price_notes to terms the
+-- venue never saw -> renter confirms -> confirm_rental() freezes the
+-- renter's version into the write-once rental_agreements row with no
+-- invalidation and no way to correct it afterward (rental_agreements has no
+-- UPDATE policy). Every column that confirm_rental() reads off `req` to
+-- populate rental_agreements must be listed here — there is no other
+-- enforcement mechanism, so re-verify this list any time confirm_rental()'s
+-- insert changes.
 create or replace function public.rental_requests_invalidate_stale_confirmation()
 returns trigger
 language plpgsql
@@ -508,6 +585,9 @@ begin
      or new.proposed_starts_at is distinct from old.proposed_starts_at
      or new.proposed_ends_at is distinct from old.proposed_ends_at
      or new.proposed_price is distinct from old.proposed_price
+     or new.price_notes is distinct from old.price_notes
+     or new.inclusions_requested is distinct from old.inclusions_requested
+     or new.setup_teardown_note is distinct from old.setup_teardown_note
      or new.proposed_cancellation_terms is distinct from old.proposed_cancellation_terms
      or new.proposed_cancellation_deadline is distinct from old.proposed_cancellation_deadline
      or new.proposed_no_show_terms is distinct from old.proposed_no_show_terms
@@ -537,11 +617,24 @@ create policy "rental_requests_select_parties"
 
 -- Item 8: a soft-deleted (is_active = false) space can't be newly booked —
 -- block the request at creation time.
+--
+-- Round-3 review finding B: this policy previously had no constraint on
+-- `status` at all, so a renter could INSERT a brand-new row with
+-- status='confirmed', 'completed', or 'no_show' directly — bypassing the
+-- two-party confirm_rental() handshake entirely. A row inserted as
+-- 'confirmed' then permanently fails the UPDATE policy below (whose USING
+-- clause only allows 'requested'/'countered') and there's no DELETE policy
+-- either, so it would sit frozen forever in the venue owner's queue; a
+-- 'completed'/'no_show' insert would fabricate rental history against a
+-- venue that never rented to this person. Every new request must start in
+-- 'requested' — the only legitimate way forward from there is through the
+-- update policy below and confirm_rental()/set_booking_outcome().
 drop policy if exists "rental_requests_insert_renter" on public.rental_requests;
 create policy "rental_requests_insert_renter"
   on public.rental_requests for insert
   with check (
     auth.uid() = renter_id
+    and status = 'requested'
     and exists (select 1 from public.venue_spaces s where s.id = space_id and s.is_active)
   );
 
@@ -644,7 +737,14 @@ create table if not exists public.rental_agreements (
   no_show_terms_text text,
   agreement_hash text,
   created_at timestamptz not null default now(),
-  check (ends_at > starts_at)
+  check (ends_at > starts_at),
+  -- Round-3 review non-blocking 3: same payer/payee distinctness guarantee
+  -- as rental_requests above, applied to the frozen copy too — confirm_rental()
+  -- only ever copies req.proposed_payer/proposed_payee straight across, so
+  -- this is redundant with the source-table check today, but rental_agreements
+  -- is the immutable record of truth and shouldn't rely solely on a
+  -- constraint on a different, mutable table to stay valid.
+  check (payer <> payee)
 );
 
 create index if not exists rental_agreements_request_id_idx on public.rental_agreements(request_id);
@@ -695,12 +795,28 @@ create index if not exists venue_bookings_agreement_id_idx on public.venue_booki
 -- overlapping *requests* are fine and expected; first to actually confirm
 -- wins, the rest fail here with Postgres error 23P01 (client should catch
 -- this and show "that slot was just booked — pick another").
-alter table public.venue_bookings
-  add constraint venue_bookings_no_overlap
-  exclude using gist (
-    space_id with =,
-    tstzrange(starts_at, ends_at, '[)') with &&
-  ) where (status = 'confirmed');
+--
+-- Round-3 review non-blocking 1: unlike every other statement in this file,
+-- this `alter table ... add constraint` had no re-run guard. Since this has
+-- never executed against real Postgres, a first manual run failing partway
+-- through (for any reason) followed by Kaden re-running the whole file would
+-- die here with 42710 (duplicate object) even though nothing is actually
+-- wrong. Wrapped in the same "skip if it already exists" idempotency as the
+-- rest of the file (drop-policy-if-exists, create-or-replace, etc.).
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'venue_bookings_no_overlap'
+  ) then
+    alter table public.venue_bookings
+      add constraint venue_bookings_no_overlap
+      exclude using gist (
+        space_id with =,
+        tstzrange(starts_at, ends_at, '[)') with &&
+      ) where (status = 'confirmed');
+  end if;
+end;
+$$;
 
 alter table public.venue_bookings enable row level security;
 
