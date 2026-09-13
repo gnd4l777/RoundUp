@@ -9,3 +9,10 @@ KADEN-TASKS.md
 ACTION-NEEDED.md
 .checkin-logs/
 .claude-session.lock
+
+# These two scripts hardcode a real ntfy.sh topic. ntfy topics have no
+# auth, so the topic name itself is the credential — committing it to
+# this public repo would let anyone read Kaden's alerts or spoof pushes
+# to his phone. Must stay untracked.
+scripts/urgent-ping.sh
+scripts/run-checkin.sh
