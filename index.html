@@ -3037,6 +3037,7 @@ async function saveGeneralEvent(){
   if(endRaw){
     endTime=new Date(endRaw);
     if(isNaN(endTime.getTime())){msg.textContent='End date & time looks invalid.';return;}
+    if(endTime.getTime()<startTime.getTime()){msg.textContent='End date & time can\'t be before the start.';return;}
   }
   btn.disabled=true;btn.textContent='Posting…';
   try{
