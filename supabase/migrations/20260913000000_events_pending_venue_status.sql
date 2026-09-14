@@ -197,7 +197,7 @@ begin
   -- separately cancelled/republished through some other path in the interim.
   if req.purpose = 'event' and req.event_id is not null then
     update public.events_general set status = 'published'
-      where id = req.event_id and status = 'pending_venue';
+      where id = req.event_id and status = 'pending_venue' and owner_id = req.renter_id;
   end if;
 
   update public.rental_requests set status = 'confirmed', updated_at = now() where id = target_request_id;
