@@ -16,3 +16,13 @@ ACTION-NEEDED.md
 # to his phone. Must stay untracked.
 scripts/urgent-ping.sh
 scripts/run-checkin.sh
+
+# Local operator setup notes — instructions for Kaden, not part of the app.
+# No live secrets are in this file (placeholders only), but it belongs in the
+# same untracked category as the coordination files above, not in the repo.
+CREDENTIALS-SETUP.md
+
+# Claude Code's own machine-local state: per-worktree scratch checkouts and
+# personal permission overrides. Never meant to be committed.
+.claude/worktrees/
+.claude/settings.local.json
