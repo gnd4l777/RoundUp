@@ -616,6 +616,11 @@ button:active,[onclick]:active{opacity:.7;}
       <button class="admin-exit" onclick="lockAdmin()">✕ Exit admin</button>
     </div>
   </div>
+  <!-- Reachable by admins AND moderators, independent of the demo admin-bar
+       above (which is only ever shown via the passphrase or full is_admin).
+       Hidden by default; shown by JS at session bootstrap once we know the
+       real is_admin/is_moderator flags from Supabase. -->
+  <button id="moderatorToolsBtn" onclick="openReportsQueue()" style="display:none;position:fixed;bottom:70px;right:14px;z-index:40;background:var(--red);color:#fff;border:none;border-radius:50%;width:46px;height:46px;font-size:18px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.4)">🚩</button>
   <div class="screen-wrap" id="screenWrap"></div>
 </div>
 
@@ -653,6 +658,22 @@ button:active,[onclick]:active{opacity:.7;}
       <div style="font-size:10px;color:var(--mid);margin-top:6px;line-height:1.5">Review submitted credentials. Cross-reference with OSAC and FightFax before approving. Unverified users cannot access fight features.</div>
     </div>
     <div class="admin-section">
+      <div class="admin-section-title">Content reports</div>
+      <div class="admin-btn-row">
+        <button class="admin-action" onclick="closeAdmin();openReportsQueue()" style="background:rgba(232,37,26,.08);border-color:rgba(232,37,26,.3);color:var(--red);font-weight:600;flex:1">🚩 Review Reports</button>
+      </div>
+      <div style="font-size:10px;color:var(--mid);margin-top:6px;line-height:1.5">User-submitted reports on messages, reels, and profiles. Also reachable via the flag button on any screen once you're an admin or moderator.</div>
+    </div>
+    <div class="admin-section">
+      <div class="admin-section-title">Team & roles</div>
+      <div style="font-size:10px;color:var(--mid);margin-bottom:8px;line-height:1.5">Look up a teammate by username and set their access. Moderator can resolve reports and delete abusive content. Admin can additionally verify venue spaces, certify gyms, and manage other people's roles.</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="teamRoleUsernameInput" placeholder="username" style="flex:1;background:var(--dark3);border:1px solid var(--dark4);border-radius:8px;padding:8px 12px;color:var(--white);font-size:12px;font-family:'DM Sans',sans-serif">
+        <button class="admin-action" onclick="lookupUserForRole()">Find</button>
+      </div>
+      <div id="teamRoleResult" style="font-size:11px;color:var(--mid)"></div>
+    </div>
+    <div class="admin-section">
       <div class="admin-section-title">v2.0 Final — Compliance audit applied</div>
       <div style="font-size:11px;color:var(--light);line-height:1.7;background:var(--dark3);border-radius:var(--r-sm);padding:12px 14px;">
         <strong style="color:var(--gold)">Amateur-status protection (legal audit):</strong><br>
@@ -676,6 +697,16 @@ button:active,[onclick]:active{opacity:.7;}
       </div>
     </div>
     <button class="admin-action" onclick="closeAdmin()" style="width:100%;background:var(--red);color:#fff;border-color:var(--red);font-weight:600;">Close</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="reportsQueueModal" onclick="if(event.target===this)closeReportsQueue()">
+  <div class="modal" style="max-height:88vh;overflow-y:auto">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Content Reports</div>
+    <div class="modal-sub">Visible to admins and moderators only</div>
+    <div id="reportsQueueList" style="display:flex;flex-direction:column;gap:10px;margin-top:10px">Loading…</div>
+    <button class="admin-action" onclick="closeReportsQueue()" style="width:100%;background:var(--red);color:#fff;border-color:var(--red);font-weight:600;margin-top:14px">Close</button>
   </div>
 </div>
 
@@ -8153,7 +8184,7 @@ async function deleteComment(reelId,commentId){
 }
 
 function renderReelsFeed(role){
-  const isAdmin=document.getElementById('app').classList.contains('admin-unlocked');
+  const isAdmin=document.getElementById('app').classList.contains('admin-unlocked')||!!window.ruIsModerator;
   const myId=window.ruUserId||null;
 
   // Kick off a load if we haven't yet this session (not persisted in state).
@@ -9482,6 +9513,121 @@ function openPreEventDisclosureForCard(eid){
 function openAdmin(){document.getElementById('adminModal').classList.add('show');}
 function closeAdmin(){document.getElementById('adminModal').classList.remove('show');}
 
+/* ══════════════════════════════════════════════════════════════
+   REPORTS QUEUE (admin + moderator). Reachable via the floating 🚩
+   button (moderatorToolsBtn, shown to admins and moderators only) or
+   from inside the Admin Panel. RLS on content_reports (see
+   supabase/migrations/20260925010000_add_moderator_role_and_admin_management.sql)
+   already restricts real read/write access to admin/moderator accounts —
+   this UI doesn't re-check that client-side, it just won't be reachable
+   for anyone else since moderatorToolsBtn stays hidden for them.
+   ══════════════════════════════════════════════════════════════ */
+function openReportsQueue(){
+  document.getElementById('reportsQueueModal').classList.add('show');
+  loadReportsQueue();
+}
+function closeReportsQueue(){document.getElementById('reportsQueueModal').classList.remove('show');}
+const REPORT_STATUS_COLORS={open:'var(--gold)',reviewed:'#2A7FE8',dismissed:'var(--mid)',actioned:'var(--red)'};
+async function loadReportsQueue(){
+  const db=window.ruDB; const listEl=document.getElementById('reportsQueueList');
+  if(!db||!listEl)return;
+  listEl.innerHTML='Loading…';
+  try{
+    const {data,error}=await db.from('content_reports')
+      .select('id,content_type,content_id,reported_user_id,reason,details,status,created_at')
+      .order('created_at',{ascending:false})
+      .limit(100);
+    if(error)throw error;
+    const reports=data||[];
+    if(!reports.length){listEl.innerHTML='<div style="font-size:12px;color:var(--mid);text-align:center;padding:20px 0">No reports.</div>';return;}
+    listEl.innerHTML=reports.map(r=>`
+      <div style="background:var(--dark2);border:1px solid var(--dark3);border-radius:8px;padding:12px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div>
+            <div style="font-size:11px;color:var(--mid);text-transform:uppercase;letter-spacing:.5px">${escapeHtml(r.content_type)}${r.content_id?' · '+escapeHtml(String(r.content_id)).slice(0,8):''}</div>
+            <div style="font-size:13px;font-weight:600;color:var(--white);margin-top:2px">${escapeHtml(r.reason)}</div>
+          </div>
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:${REPORT_STATUS_COLORS[r.status]||'var(--mid)'}">${escapeHtml(r.status)}</div>
+        </div>
+        ${r.details?`<div style="font-size:12px;color:var(--lighter);margin-top:6px;line-height:1.5">${escapeHtml(r.details)}</div>`:''}
+        <div style="font-size:10px;color:var(--mid);margin-top:6px">${timeAgo(r.created_at)}${r.reported_user_id?' · reported user id: '+escapeHtml(r.reported_user_id):''}</div>
+        ${r.status==='open'||r.status==='reviewed'?`
+        <div style="display:flex;gap:6px;margin-top:10px">
+          ${r.status==='open'?`<button onclick="updateReportStatus('${r.id}','reviewed')" style="flex:1;padding:7px;border-radius:6px;border:1px solid #2A7FE8;background:transparent;color:#2A7FE8;font-size:11px;cursor:pointer">Mark Reviewed</button>`:''}
+          <button onclick="updateReportStatus('${r.id}','actioned')" style="flex:1;padding:7px;border-radius:6px;border:none;background:var(--red);color:#fff;font-size:11px;cursor:pointer">Mark Actioned</button>
+          <button onclick="updateReportStatus('${r.id}','dismissed')" style="flex:1;padding:7px;border-radius:6px;border:1px solid var(--dark5);background:transparent;color:var(--mid);font-size:11px;cursor:pointer">Dismiss</button>
+        </div>`:''}
+      </div>
+    `).join('');
+  }catch(e){
+    console.log('loadReportsQueue error:',e&&e.message);
+    listEl.innerHTML='<div style="font-size:12px;color:var(--mid);text-align:center;padding:20px 0">Could not load reports.</div>';
+  }
+}
+async function updateReportStatus(reportId,status){
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {error}=await db.from('content_reports').update({status}).eq('id',reportId);
+    if(error)throw error;
+    loadReportsQueue();
+  }catch(e){
+    console.log('updateReportStatus error:',e&&e.message);
+    alert(e&&e.message?e.message:'Could not update report. Please try again.');
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TEAM & ROLES (admin only — this section of the Admin Panel is only
+   reachable by accounts with admin-unlocked, which real is_admin grants
+   automatically). Looks a teammate up by username, then sets their role
+   via admin_set_user_role() — the only path that can ever change
+   is_admin/is_moderator (SECURITY DEFINER, checks the caller is already
+   an admin, guards against removing the last admin).
+   ══════════════════════════════════════════════════════════════ */
+let _teamRoleTargetId=null;
+async function lookupUserForRole(){
+  const db=window.ruDB; const resultEl=document.getElementById('teamRoleResult');
+  if(!db||!resultEl)return;
+  const input=document.getElementById('teamRoleUsernameInput');
+  const username=((input&&input.value)||'').trim().replace(/^@/,'');
+  if(!username){resultEl.innerHTML='Enter a username.';return;}
+  resultEl.innerHTML='Searching…';
+  try{
+    const {data,error}=await db.from('profiles_public').select('id,display_name,username').ilike('username',username).limit(1);
+    if(error)throw error;
+    const u=data&&data[0];
+    if(!u){_teamRoleTargetId=null;resultEl.innerHTML='No user found with that username.';return;}
+    _teamRoleTargetId=u.id;
+    const label=escapeHtml(u.display_name||u.username||'this user');
+    resultEl.innerHTML=`
+      <div style="margin-bottom:8px">Found: <strong style="color:var(--white)">${label}</strong>${u.username?' (@'+escapeHtml(u.username)+')':''}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="admin-action" onclick="setUserRole(true,false)" style="background:rgba(232,37,26,.1);border-color:var(--red);color:var(--red)">Make Admin</button>
+        <button class="admin-action" onclick="setUserRole(false,true)" style="background:rgba(42,127,232,.1);border-color:#2A7FE8;color:#2A7FE8">Make Moderator</button>
+        <button class="admin-action" onclick="setUserRole(false,false)">Remove Elevated Access</button>
+      </div>`;
+  }catch(e){
+    console.log('lookupUserForRole error:',e&&e.message);
+    resultEl.innerHTML='Search failed. Please try again.';
+  }
+}
+async function setUserRole(makeAdmin,makeModerator){
+  const db=window.ruDB; if(!db||!_teamRoleTargetId)return;
+  const label=makeAdmin?'Admin':makeModerator?'Moderator':'no elevated role (removes Admin and Moderator)';
+  if(!confirm('Set this user to '+label+'?'))return;
+  try{
+    const {error}=await db.rpc('admin_set_user_role',{target_user_id:_teamRoleTargetId,make_admin:makeAdmin,make_moderator:makeModerator});
+    if(error)throw error;
+    alert('Updated. They\'ll see the change next time they log in or refresh the app.');
+    const resultEl=document.getElementById('teamRoleResult'); if(resultEl)resultEl.innerHTML='';
+    const input=document.getElementById('teamRoleUsernameInput'); if(input)input.value='';
+    _teamRoleTargetId=null;
+  }catch(e){
+    console.log('setUserRole error:',e&&e.message);
+    alert(e&&e.message?e.message:'Could not update role. Please try again.');
+  }
+}
+
 loadState();
 render();
 
@@ -9678,7 +9824,7 @@ render();
       }catch(e){console.log('profile ensure error:',e&&e.message);}
       // Load the saved profile photo + self-listed role (if any) after refresh.
       // Fully non-fatal: any failure here just means we fall back to metadata.
-      db.from('profiles').select('display_name,avatar_url,role,role_info,is_admin').eq('id',res.data.user.id).limit(1).then(function(pr){
+      db.from('profiles').select('display_name,avatar_url,role,role_info,is_admin,is_moderator').eq('id',res.data.user.id).limit(1).then(function(pr){
         var row=pr&&pr.data&&pr.data[0];
         if(row){
           if(row.avatar_url)window.ruAvatarUrl=row.avatar_url;
@@ -9688,7 +9834,13 @@ render();
           // Real admin gate: if this account is marked is_admin in Supabase,
           // unlock moderation tools (delete any reel/comment, etc.).
           window.ruIsAdmin = !!row.is_admin;
+          // Lighter tier (Launch checklist Phase 1): can resolve reports and
+          // delete abusive content, but never venue verification/gym
+          // certification/team role management — those stay admin-only.
+          window.ruIsModerator = !!row.is_moderator;
           if(row.is_admin && typeof window.ruUnlockAdmin==='function'){window.ruUnlockAdmin(false);}
+          var mtb=document.getElementById('moderatorToolsBtn');
+          if(mtb && (window.ruIsAdmin || window.ruIsModerator))mtb.style.display='flex';
           if(typeof render==='function')render();
         }
       }).catch(function(e){console.log('profile load skipped:',e&&e.message);});
