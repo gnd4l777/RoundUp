@@ -5237,9 +5237,25 @@ function renderConversation(){
             const rm2=(m.body||'').match(/^\[rental:([0-9a-fA-F-]+)\]$/);
             if(rm2){
               const rental=(state.dmRentalCards||{})[rm2[1]];
-              const inner=rental
-                ? `<div style="padding:10px 12px"><div style="font-size:10px;color:var(--mid);margin-bottom:2px">🏟 Venue rental request</div><div style="font-size:13px;font-weight:600;color:var(--white)">${escapeHtml(rental.venueName||'Venue')} — ${escapeHtml(rental.spaceName||'Space')}</div><div style="font-size:11px;color:var(--lighter);margin-top:2px">${fmtEventDateTime(rental.proposed_starts_at)}</div><div style="font-size:10px;color:var(--gold);margin-top:4px;text-transform:uppercase;font-weight:600">${escapeHtml(rental.status||'requested')}</div></div>`
-                : `<div style="padding:10px 12px;font-size:12px;color:var(--mid)">🏟 Venue rental request</div>`;
+              let inner;
+              if(rental){
+                const isVenue=myId===rental.venue_owner_id;
+                const isRenter=myId===rental.renter_id;
+                const myConfirmed=isVenue?!!rental.venue_confirmed_at:(isRenter?!!rental.renter_confirmed_at:false);
+                const otherConfirmed=isVenue?!!rental.renter_confirmed_at:(isRenter?!!rental.venue_confirmed_at:false);
+                const negotiable=rental.status==='requested'||rental.status==='countered';
+                const canAct=negotiable&&(isVenue||isRenter)&&!myConfirmed;
+                let statusLine;
+                if(rental.status==='confirmed')statusLine=`<div style="font-size:10px;color:var(--gold);margin-top:4px;text-transform:uppercase;font-weight:600">✅ Confirmed</div>`;
+                else if(rental.status==='declined')statusLine=`<div style="font-size:10px;color:var(--mid);margin-top:4px;text-transform:uppercase;font-weight:600">Declined</div>`;
+                else if(rental.status==='cancelled')statusLine=`<div style="font-size:10px;color:var(--mid);margin-top:4px;text-transform:uppercase;font-weight:600">Cancelled</div>`;
+                else if(negotiable&&myConfirmed&&!otherConfirmed)statusLine=`<div style="font-size:10px;color:var(--gold);margin-top:4px;text-transform:uppercase;font-weight:600">You accepted — waiting on ${isVenue?'renter':'venue'}</div>`;
+                else statusLine=`<div style="font-size:10px;color:var(--gold);margin-top:4px;text-transform:uppercase;font-weight:600">${escapeHtml(rental.status||'requested')}</div>`;
+                const actions=canAct?`<div style="display:flex;gap:8px;margin-top:8px"><button onclick="acceptRentalRequest('${rm2[1]}')" style="flex:1;padding:8px;border-radius:8px;border:none;background:var(--gold);color:#000;font-size:11px;font-weight:600;cursor:pointer">Accept</button><button onclick="declineRentalRequest('${rm2[1]}')" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--dark5);background:transparent;color:var(--mid);font-size:11px;font-weight:600;cursor:pointer">Decline</button></div>`:'';
+                inner=`<div style="padding:10px 12px"><div style="font-size:10px;color:var(--mid);margin-bottom:2px">🏟 Venue rental request</div><div style="font-size:13px;font-weight:600;color:var(--white)">${escapeHtml(rental.venueName||'Venue')} — ${escapeHtml(rental.spaceName||'Space')}</div><div style="font-size:11px;color:var(--lighter);margin-top:2px">${fmtEventDateTime(rental.proposed_starts_at)}</div>${statusLine}${actions}</div>`;
+              }else{
+                inner=`<div style="padding:10px 12px;font-size:12px;color:var(--mid)">🏟 Venue rental request</div>`;
+              }
               return `<div class="msg ${m.sender_id===myId?'mine':'theirs'}" style="padding:0;overflow:hidden;max-width:78%">${inner}</div>`;
             }
             return `<div class="msg ${m.sender_id===myId?'mine':'theirs'}">${escapeHtml(m.body)}</div>`;
@@ -5252,6 +5268,46 @@ function renderConversation(){
   `;
 }
 function sendPreset(text){const inp=document.getElementById('msgInput');if(inp){inp.value=text;sendMsg();}}
+
+// Accept/decline handlers for the [rental:ID] DM card (Slice 2b). Both are
+// reachable by whichever party hasn't yet confirmed (rental_requests RLS/
+// confirm_rental() enforce this server-side too — these are UI gates, not
+// the security boundary). Accept goes through confirm_rental() (SECURITY
+// DEFINER) since only it may set renter_confirmed_at/venue_confirmed_at and
+// flip status to 'confirmed'. Decline is a plain client-side update — the
+// rental_requests_update_parties policy already allows either party to move
+// a 'requested'/'countered' row to 'declined'.
+async function acceptRentalRequest(requestId){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  try{
+    const {error}=await db.rpc('confirm_rental',{target_request_id:requestId});
+    if(error)throw error;
+  }catch(e){
+    console.log('acceptRentalRequest error:',e&&e.message);
+    alert(e&&e.message?e.message:'Could not accept this request. Please try again.');
+  }
+  await loadDMThread(state.drilldown);
+}
+async function declineRentalRequest(requestId){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  if(!confirm('Decline this rental request?'))return;
+  try{
+    const rental=(state.dmRentalCards||{})[requestId]||{};
+    const lastActor=user.id===rental.venue_owner_id?'venue':'renter';
+    const {error}=await db.from('rental_requests')
+      .update({status:'declined',last_actor:lastActor})
+      .eq('id',requestId);
+    if(error)throw error;
+  }catch(e){
+    console.log('declineRentalRequest error:',e&&e.message);
+    alert(e&&e.message?e.message:'Could not decline this request. Please try again.');
+  }
+  await loadDMThread(state.drilldown);
+}
 
 // Load one DM thread between me and the other user, plus their profile.
 async function loadDMThread(otherId){
@@ -5294,13 +5350,17 @@ async function loadDMThread(otherId){
       try{
         if(!state.dmRentalCards)state.dmRentalCards={};
         const rr2=await db.from('rental_requests')
-          .select('id,status,proposed_starts_at,proposed_ends_at,venue_spaces(name,venues(name))')
+          .select('id,status,proposed_starts_at,proposed_ends_at,renter_id,venue_owner_id,renter_confirmed_at,venue_confirmed_at,venue_spaces(name,venues(name))')
           .in('id',rentalIds);
         (rr2.data||[]).forEach(r=>{
           state.dmRentalCards[r.id]={
             status:r.status,
             proposed_starts_at:r.proposed_starts_at,
             proposed_ends_at:r.proposed_ends_at,
+            renter_id:r.renter_id,
+            venue_owner_id:r.venue_owner_id,
+            renter_confirmed_at:r.renter_confirmed_at,
+            venue_confirmed_at:r.venue_confirmed_at,
             spaceName:r.venue_spaces&&r.venue_spaces.name,
             venueName:r.venue_spaces&&r.venue_spaces.venues&&r.venue_spaces.venues.name
           };
