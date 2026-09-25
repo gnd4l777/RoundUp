@@ -142,8 +142,41 @@ grant update (status) on public.content_reports to authenticated;
 --    blocks, the conversation is closed for new sends both ways, matching
 --    common product convention and avoiding a one-sided "I blocked them but
 --    they can still message me" gap.
+--
+--    2026-09-25 fix: this originally hardcoded `drop policy if exists
+--    "messages_insert_own"`, assuming that exact name from
+--    20260906020000_restrict_messages_exposure.sql was still live. Running
+--    this against production surfaced that it isn't — the real live policy
+--    set is three differently-named permissive INSERT policies ("Users can
+--    send messages", "messages insert", "messages_insert_as_sender"),
+--    almost certainly from a later dashboard edit that didn't update this
+--    repo. Switched to the same dynamic lookup-and-drop pattern the
+--    original migration used, rather than guessing a name a second time.
 -- ----------------------------------------------------------------------------
-drop policy if exists "messages_insert_own" on public.messages;
+do $$
+declare
+  names text[];
+  nm text;
+begin
+  select coalesce(array_agg(policyname), '{}') into names
+  from pg_policies
+  where schemaname = 'public' and tablename = 'messages'
+    and permissive = 'PERMISSIVE' and cmd = 'INSERT';
+
+  if exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'messages'
+      and permissive = 'PERMISSIVE' and cmd = 'ALL'
+  ) then
+    raise exception 'public.messages has a permissive FOR ALL policy that also grants INSERT. Split it into explicit policies first, then re-run.';
+  end if;
+
+  foreach nm in array names loop
+    execute format('drop policy %I on public.messages', nm);
+    raise notice 'Dropped permissive INSERT policy on messages: %', nm;
+  end loop;
+end $$;
+
 create policy "messages_insert_own"
   on public.messages for insert
   with check (
