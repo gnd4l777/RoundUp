@@ -1,0 +1,56 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+      "Edit(./index.html)",
+      "Edit(./manifest.json)",
+      "Edit(./service-worker.js)",
+      "Bash(bash scripts/check-syntax.sh*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git add*)",
+      "Bash(bash scripts/safe-commit.sh*)",
+      "Bash(git checkout -b agent/*)",
+      "Bash(git push origin agent/*)",
+      "Bash(gh pr create*)",
+      "Bash(gh pr view*)",
+      "Bash(gh pr list*)",
+      "Bash(gh pr diff*)",
+      "Bash(bash scripts/urgent-ping.sh*)",
+      "Bash(bash scripts/safe-push.sh*)",
+      "Bash(bash scripts/check-lock.sh*)",
+      "Bash(bash scripts/release-lock.sh*)",
+      "Edit(./supabase/migrations/**)",
+      "Edit(./DIGEST.md)",
+      "Edit(./PENDING_APPROVAL.md)",
+      "Edit(./TASKS.md)",
+      "Edit(./LEARNINGS.md)"
+    ],
+    "ask": [
+      "Edit(./LICENSE)",
+      "Edit(./README.md)",
+      "Edit(./.claude/agents/roundup-admin.md)",
+      "Edit(./.claude/agents/roundup-builder.md)",
+      "Edit(./.claude/agents/roundup-designer.md)",
+      "Edit(./.claude/settings.json)"
+    ],
+    "deny": [
+      "Bash(rm -rf*)",
+      "Bash(git push*main*)",
+      "Bash(git push*master*)",
+      "Bash(git push --force*)",
+      "Bash(git push*--force*)",
+      "Bash(gh pr merge*)",
+      "Bash(wrangler deploy*)",
+      "Bash(wrangler publish*)",
+      "Bash(supabase db push*)",
+      "Bash(supabase migration up*)",
+      "Bash(supabase db reset*)",
+      "Bash(psql*)",
+      "Bash(*service_role*)",
+      "Bash(*SUPABASE_SERVICE_ROLE*)"
+    ]
+  }
+}
