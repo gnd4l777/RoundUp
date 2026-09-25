@@ -620,7 +620,7 @@ button:active,[onclick]:active{opacity:.7;}
        above (which is only ever shown via the passphrase or full is_admin).
        Hidden by default; shown by JS at session bootstrap once we know the
        real is_admin/is_moderator flags from Supabase. -->
-  <button id="moderatorToolsBtn" onclick="openReportsQueue()" style="display:none;position:fixed;bottom:70px;right:14px;z-index:40;background:var(--red);color:#fff;border:none;border-radius:50%;width:46px;height:46px;font-size:18px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.4)">🚩</button>
+  <button id="moderatorToolsBtn" onclick="openReportsQueue()" aria-label="Content reports queue" style="display:none;position:fixed;bottom:70px;right:14px;z-index:40;background:var(--red);color:#fff;border:none;border-radius:50%;width:46px;height:46px;font-size:18px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.4)">🚩</button>
   <div class="screen-wrap" id="screenWrap"></div>
 </div>
 
@@ -867,7 +867,7 @@ function openProfileMenu(){
     <div class="modal" style="text-align:left">
       <div class="modal-handle"></div>
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
-        ${window.ruAvatarUrl?`<img src="${safeUrl(window.ruAvatarUrl)}" style="width:46px;height:46px;border-radius:50%;object-fit:cover">`:`<div style="width:46px;height:46px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:18px">${(name[0]||'C').toUpperCase()}</div>`}
+        ${window.ruAvatarUrl?`<img src="${safeUrl(window.ruAvatarUrl)}" alt="Your profile photo" style="width:46px;height:46px;border-radius:50%;object-fit:cover">`:`<div style="width:46px;height:46px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:18px">${(name[0]||'C').toUpperCase()}</div>`}
         <div style="min-width:0">
           <div style="font-size:15px;font-weight:700;color:var(--white)">${name}</div>
           <div style="font-size:11px;color:var(--mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${email}</div>
@@ -896,7 +896,7 @@ function avatarHtml(prof, name, size){
   const url=prof&&prof.avatar_url;
   const label=initials(name||(prof&&(prof.display_name||prof.username))||'?');
   if(url){
-    return `<img src="${safeUrl(url)}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="lazy">`;
+    return `<img src="${safeUrl(url)}" alt="${escapeHtml((name||(prof&&(prof.display_name||prof.username))||'Profile'))+' photo'}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex-shrink:0" loading="lazy">`;
   }
   return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:${Math.round(size*0.36)}px;flex-shrink:0">${label}</div>`;
 }
@@ -913,7 +913,7 @@ function openEditProfile(){
       <div class="modal-handle"></div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:var(--white);margin-bottom:14px">Edit Profile</div>
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
-        <div id="epAvatarPreview">${cur?`<img src="${safeUrl(cur)}" style="width:64px;height:64px;border-radius:50%;object-fit:cover">`:`<div style="width:64px;height:64px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:24px">${initials(name)}</div>`}</div>
+        <div id="epAvatarPreview">${cur?`<img src="${safeUrl(cur)}" alt="Your profile photo preview" style="width:64px;height:64px;border-radius:50%;object-fit:cover">`:`<div style="width:64px;height:64px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:24px">${initials(name)}</div>`}</div>
         <div style="flex:1">
           <label style="font-size:12px;color:var(--mid)">Profile photo</label>
           <input id="epPhoto" type="file" accept="image/*" style="display:block;margin-top:6px;color:var(--lighter);font-size:12px;width:100%">
@@ -924,6 +924,11 @@ function openEditProfile(){
       <div id="epMsg" style="font-size:12px;color:var(--mid);margin-top:10px;min-height:16px"></div>
       <button id="epSaveBtn" onclick="saveProfile()" style="width:100%;background:var(--red);color:#fff;border:none;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">Save</button>
       <button onclick="document.getElementById('ruEditProfile').style.display='none'" style="width:100%;background:transparent;color:var(--mid);border:none;padding:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:4px">Cancel</button>
+      <div style="border-top:1px solid var(--dark3);margin-top:14px;padding-top:14px">
+        <div style="font-size:11px;color:var(--mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Your data</div>
+        <button onclick="downloadMyData()" style="width:100%;background:transparent;border:1px solid var(--dark4);color:var(--lighter);padding:11px;border-radius:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-bottom:8px">⬇ Download my data</button>
+        <button onclick="deactivateMyAccount()" style="width:100%;background:rgba(232,37,26,.08);border:1px solid rgba(232,37,26,.3);color:var(--red);padding:11px;border-radius:10px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif">Delete my account</button>
+      </div>
     </div>`;
   m.style.display='flex';
 }
@@ -966,6 +971,73 @@ async function saveProfile(){
     console.log('saveProfile error:',e);
     msg.textContent='Could not save. Please check your entries and try again.';
     btn.disabled=false;btn.textContent='Save';
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ACCOUNT DATA EXPORT / DEACTIVATION (Launch checklist Phase 1).
+   Deactivation is SOFT, not a hard cascading delete — see
+   supabase/migrations/20260925020000_add_account_deactivation.sql for why.
+   It sets profiles.is_active=false (which drops the account out of
+   profiles_public — the only surface other users can find/message someone
+   through), then signs the device out immediately. Session bootstrap also
+   force-signs-out on next login if is_active is ever false, so a
+   deactivated account can't just keep using an already-open session.
+   ══════════════════════════════════════════════════════════════ */
+async function downloadMyData(){
+  const db=window.ruDB; if(!db){alert('Not connected.');return;}
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  try{
+    const [profile,reels,comments,eventsOwned,rentalsAsRenter,rentalsAsVenue,messagesSent,messagesReceived]=await Promise.all([
+      db.from('profiles').select('*').eq('id',user.id).limit(1),
+      db.from('reels').select('*').eq('author_id',user.id),
+      db.from('reel_comments').select('*').eq('author_id',user.id),
+      db.from('events_general').select('*').eq('owner_id',user.id),
+      db.from('rental_requests').select('*').eq('renter_id',user.id),
+      db.from('rental_requests').select('*').eq('venue_owner_id',user.id),
+      db.from('messages').select('*').eq('sender_id',user.id),
+      db.from('messages').select('*').eq('recipient_id',user.id)
+    ]);
+    const payload={
+      exported_at:new Date().toISOString(),
+      account_email:user.email,
+      profile:(profile.data&&profile.data[0])||null,
+      reels:reels.data||[],
+      reel_comments:comments.data||[],
+      events:eventsOwned.data||[],
+      rental_requests_as_renter:rentalsAsRenter.data||[],
+      rental_requests_as_venue:rentalsAsVenue.data||[],
+      messages_sent:messagesSent.data||[],
+      messages_received:messagesReceived.data||[]
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='roundup-my-data-'+new Date().toISOString().slice(0,10)+'.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }catch(e){
+    console.log('downloadMyData error:',e&&e.message);
+    alert('Could not prepare your data export. Please try again.');
+  }
+}
+async function deactivateMyAccount(){
+  const db=window.ruDB; if(!db){alert('Not connected.');return;}
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  if(!confirm('Delete your RoundUp account?\n\nYour profile will be removed from search, the directory, and messaging immediately, and you\'ll be signed out. Your existing messages and posts are not erased, but your profile will no longer be linked to them for other users. This can be undone by contacting support if you change your mind.'))return;
+  if(!confirm('Are you sure? This will sign you out right away.'))return;
+  try{
+    const {error}=await db.from('profiles').update({is_active:false}).eq('id',user.id);
+    if(error)throw error;
+    try{localStorage.removeItem(STORAGE_KEY);}catch(e){}
+    try{localStorage.removeItem('ru_admin');}catch(e){}
+    await db.auth.signOut();
+    location.reload();
+  }catch(e){
+    console.log('deactivateMyAccount error:',e&&e.message);
+    alert('Could not deactivate your account. Please try again or contact support.');
   }
 }
 
@@ -1235,7 +1307,7 @@ async function openGymForm(gymId){
       <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:8px;padding:9px 11px;font-size:10px;color:var(--lighter);line-height:1.5;margin:10px 0">🏋 This is your gym's page — you own and control it. Self-listed for early access; not verified by RoundUp.</div>
 
       <div style="display:flex;align-items:center;gap:14px;margin-top:6px">
-        <div id="gfAvatarPreview">${gym.avatar_url?`<img src="${safeUrl(gym.avatar_url)}" style="width:64px;height:64px;border-radius:14px;object-fit:cover">`:`<div style="width:64px;height:64px;border-radius:14px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:28px">🏋</div>`}</div>
+        <div id="gfAvatarPreview">${gym.avatar_url?`<img src="${safeUrl(gym.avatar_url)}" alt="Gym logo preview" style="width:64px;height:64px;border-radius:14px;object-fit:cover">`:`<div style="width:64px;height:64px;border-radius:14px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:28px">🏋</div>`}</div>
         <div style="flex:1"><label style="${lbl};margin-top:0">Gym photo</label><input id="gf_photo" type="file" accept="image/*" style="display:block;margin-top:6px;color:var(--lighter);font-size:12px;width:100%"></div>
       </div>
 
@@ -1543,10 +1615,10 @@ function renderVenuePage(){
   const myId=window.ruUserId||null;
 
   if(state.viewVenueLoading && !v){
-    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Venue</div><div style="width:38px"></div></div><div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading venue…</div></div>`;
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Venue</div><div style="width:38px"></div></div><div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading venue…</div></div>`;
   }
   if(!v){
-    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Venue</div><div style="width:38px"></div></div><div class="empty"><div class="empty-icon">🏟</div><div class="empty-title">Venue not found</div><div class="empty-text">It may not exist yet, or the venue tables haven't been applied to the database yet.</div></div>`;
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Venue</div><div style="width:38px"></div></div><div class="empty"><div class="empty-icon">🏟</div><div class="empty-title">Venue not found</div><div class="empty-text">It may not exist yet, or the venue tables haven't been applied to the database yet.</div></div>`;
   }
   const isOwner=(v.owner_id===myId);
   const owner=state.viewVenueOwner;
@@ -1555,10 +1627,10 @@ function renderVenuePage(){
   const cityLine=[v.city,v.region].filter(Boolean).join(', ');
 
   return `
-    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Venue</div><div style="width:38px"></div></div>
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Venue</div><div style="width:38px"></div></div>
     <div class="inner-scroll">
       <div style="padding:24px 18px 16px;text-align:center;background:linear-gradient(180deg,rgba(42,127,232,.08),transparent)">
-        ${v.photo_url?`<img src="${safeUrl(v.photo_url)}" style="width:84px;height:84px;border-radius:18px;object-fit:cover;margin:0 auto 12px;display:block">`:`<div style="width:84px;height:84px;border-radius:18px;background:rgba(42,127,232,.15);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:38px;margin:0 auto 12px">🏟</div>`}
+        ${v.photo_url?`<img src="${safeUrl(v.photo_url)}" alt="${escapeHtml(v.name||'Venue')} photo" style="width:84px;height:84px;border-radius:18px;object-fit:cover;margin:0 auto 12px;display:block">`:`<div style="width:84px;height:84px;border-radius:18px;background:rgba(42,127,232,.15);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:38px;margin:0 auto 12px">🏟</div>`}
         <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;color:var(--white);line-height:1">${escapeHtml(v.name)}</div>
         ${cityLine?`<div style="font-size:13px;color:var(--lighter);margin-top:4px">📍 ${escapeHtml(cityLine)}</div>`:''}
         <div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:var(--dark3);padding:4px 12px;border-radius:12px"><span style="font-size:11px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:.5px">Venue</span><span style="font-size:9px;color:var(--mid)">● self-listed, not verified by RoundUp</span></div>
@@ -1742,20 +1814,20 @@ function renderGymPage(){
   const myId=window.ruUserId||null;
 
   if(state.viewGymLoading && !g){
-    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Gym</div><div style="width:38px"></div></div><div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading gym…</div></div>`;
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Gym</div><div style="width:38px"></div></div><div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading gym…</div></div>`;
   }
   if(!g){
-    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Gym</div><div style="width:38px"></div></div><div class="empty"><div class="empty-icon">🏋</div><div class="empty-title">Gym not found</div></div>`;
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Gym</div><div style="width:38px"></div></div><div class="empty"><div class="empty-icon">🏋</div><div class="empty-title">Gym not found</div></div>`;
   }
   const isOwner=(g.owner_id===myId);
   const owner=state.viewGymOwner;
   const ownerName=escapeHtml(owner?(owner.display_name||owner.username||'Owner'):'Owner');
 
   return `
-    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Gym</div><div style="width:38px"></div></div>
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Gym</div><div style="width:38px"></div></div>
     <div class="inner-scroll">
       <div style="padding:24px 18px 16px;text-align:center;background:linear-gradient(180deg,rgba(245,166,35,.08),transparent)">
-        ${g.avatar_url?`<img src="${safeUrl(g.avatar_url)}" style="width:84px;height:84px;border-radius:18px;object-fit:cover;margin:0 auto 12px;display:block">`:`<div style="width:84px;height:84px;border-radius:18px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:38px;margin:0 auto 12px">🏋</div>`}
+        ${g.avatar_url?`<img src="${safeUrl(g.avatar_url)}" alt="${escapeHtml(g.name||'Gym')} logo" style="width:84px;height:84px;border-radius:18px;object-fit:cover;margin:0 auto 12px;display:block">`:`<div style="width:84px;height:84px;border-radius:18px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:38px;margin:0 auto 12px">🏋</div>`}
         <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;color:var(--white);line-height:1">${escapeHtml(g.name)}</div>
         <div style="font-size:13px;color:var(--lighter);margin-top:4px">📍 ${escapeHtml(g.location||'')}</div>
         ${g.sports?`<div style="margin-top:6px"><span style="display:inline-block;background:var(--dark3);color:var(--lighter);font-size:10px;padding:3px 10px;border-radius:10px">${escapeHtml(g.sports)}</span></div>`:''}
@@ -3375,10 +3447,10 @@ function renderGeneralEventDetail(){
   const e=(state.geViewId===id)?state.geView:null;
 
   if(state.geViewLoading&&!e){
-    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Event</div><div style="width:38px"></div></div><div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading event…</div></div>`;
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Event</div><div style="width:38px"></div></div><div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading event…</div></div>`;
   }
   if(!e){
-    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Event</div><div style="width:38px"></div></div><div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">${state.geViewError?"Couldn't load event":'Event not found'}</div><div class="empty-text">${state.geViewError?'Something went wrong loading this event. Please try again.':'This event may have been removed.'}</div></div>`;
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Event</div><div style="width:38px"></div></div><div class="empty"><div class="empty-icon">🎉</div><div class="empty-title">${state.geViewError?"Couldn't load event":'Event not found'}</div><div class="empty-text">${state.geViewError?'Something went wrong loading this event. Please try again.':'This event may have been removed.'}</div></div>`;
   }
   const myId=window.ruUserId||null;
   const isOwner=e.owner_id===myId;
@@ -3387,7 +3459,7 @@ function renderGeneralEventDetail(){
   const end=e.end_time?fmtEventDateTime(e.end_time):'';
 
   return `
-    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Event</div><div style="width:38px"></div></div>
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Event</div><div style="width:38px"></div></div>
     <div class="inner-scroll">
       <div style="padding:20px 18px 14px">
         <span style="font-size:9px;font-weight:600;padding:3px 10px;border-radius:10px;background:rgba(245,166,35,.12);color:var(--gold);text-transform:uppercase;letter-spacing:.5px">${catLabel}</span>
@@ -3903,7 +3975,7 @@ function renderFighterDraftCardDetail(fdcId){
   const myOfficialAssigned=isOfficial&&Object.values(fdc.officials).includes(myId);
 
   return `
-    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Fighter Draft Card</div>${document.getElementById('app').classList.contains('admin-unlocked')?`<button onclick="deleteFighterDraftCard('${fdc.id}')" style="background:rgba(232,37,26,.15);border:1px solid var(--red);color:var(--red);font-size:10px;font-weight:600;border-radius:6px;padding:5px 9px;cursor:pointer">🗑 Delete</button>`:`<div style="width:38px"></div>`}</div>
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Fighter Draft Card</div>${document.getElementById('app').classList.contains('admin-unlocked')?`<button onclick="deleteFighterDraftCard('${fdc.id}')" style="background:rgba(232,37,26,.15);border:1px solid var(--red);color:var(--red);font-size:10px;font-weight:600;border-radius:6px;padding:5px 9px;cursor:pointer">🗑 Delete</button>`:`<div style="width:38px"></div>`}</div>
     <div class="inner-scroll">
 
       <!-- HERO -->
@@ -4615,10 +4687,10 @@ function renderProfileDetail(){
   const isMe=(id===myId);
 
   if(state.viewProfileLoading && !p){
-    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Profile</div><div style="width:38px"></div></div><div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading profile…</div></div>`;
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Profile</div><div style="width:38px"></div></div><div class="empty" style="padding:50px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading profile…</div></div>`;
   }
   if(!p){
-    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Profile</div><div style="width:38px"></div></div><div class="empty"><div class="empty-icon">🔎</div><div class="empty-title">Profile not found</div></div>`;
+    return `<div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Profile</div><div style="width:38px"></div></div><div class="empty"><div class="empty-icon">🔎</div><div class="empty-title">Profile not found</div></div>`;
   }
 
   const name=escapeHtml(p.display_name||p.username||'Creator');
@@ -4645,7 +4717,7 @@ function renderProfileDetail(){
   }
 
   return `
-    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">${isMe?'My Profile':roleLabel||'Profile'}</div><div style="width:38px"></div></div>
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">${isMe?'My Profile':roleLabel||'Profile'}</div><div style="width:38px"></div></div>
     <div class="inner-scroll">
       <div style="padding:24px 18px 16px;text-align:center;background:linear-gradient(180deg,var(--dark2),transparent)">
         <div style="display:flex;justify-content:center;margin-bottom:12px">${avatarHtml(p,name,84)}</div>
@@ -4720,7 +4792,7 @@ function renderProfileDetail(){
             ${reels.map(r=>{
               const img=r.media_url?(r.media_type==='video'
                 ? `<video src="${safeUrl(r.media_url)}#t=0.1" muted playsinline preload="metadata" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;background:#000"></video><div style="position:absolute;top:4px;right:4px;font-size:11px">▶️</div>`
-                : `<img src="${safeUrl(r.media_url)}" style="width:100%;aspect-ratio:1;object-fit:cover;display:block" loading="lazy">`):`<div style="width:100%;aspect-ratio:1;background:var(--dark3);display:flex;align-items:center;justify-content:center;font-size:18px">🥊</div>`;
+                : `<img src="${safeUrl(r.media_url)}" alt="Reel thumbnail" style="width:100%;aspect-ratio:1;object-fit:cover;display:block" loading="lazy">`):`<div style="width:100%;aspect-ratio:1;background:var(--dark3);display:flex;align-items:center;justify-content:center;font-size:18px">🥊</div>`;
               return `<div onclick="setTab('reels')" style="position:relative;border-radius:6px;overflow:hidden;cursor:pointer;background:var(--dark3)">${img}</div>`;
             }).join('')}
           </div>`}
@@ -4799,7 +4871,7 @@ function renderFighterPublic(u){
   const mySubKey='sub_'+u.id;
   const mySub=state.subscriptions&&state.subscriptions[mySubKey]||'none';
   return `
-    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Fighter</div><div style="width:38px"></div></div>
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Fighter</div><div style="width:38px"></div></div>
     <div class="inner-scroll">
       <div class="profile-hero">
         <div class="rank-badge"><div class="rank-pts">${u.rankPts}</div><div class="rank-label">Rank pts</div></div>
@@ -5027,7 +5099,7 @@ function renderGymPublic(u){
     : '';
 
   return `
-    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Gym</div><div style="width:38px"></div></div>
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Gym</div><div style="width:38px"></div></div>
     <div class="inner-scroll">
 
       <!-- ── HERO ── -->
@@ -5298,7 +5370,7 @@ function renderGenericPublic(u){
   const role=state.currentRole;
   const meId=ROLE_PROFILES[role]?.userId; const canMessage=canMessageUser(meId,u.id);
   return `
-    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">${u.role}</div><div style="width:38px"></div></div>
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">${u.role}</div><div style="width:38px"></div></div>
     <div class="inner-scroll">
       <div class="profile-hero"><div class="ph-bg"></div><div class="ph-pattern"></div><div class="ph-content"><div class="ph-avatar" style="background:${avatarBg(u.color)};color:${avatarColor(u.color)}">${u.avatar}</div><div class="ph-name">${u.name}</div><div class="ph-meta"><span><strong>${u.subRole||u.role}</strong></span></div></div></div>
       <div style="padding:14px 18px">${canMessage?`<button class="btn-primary" style="width:100%;padding:12px" onclick="openConversation('${u.id}')">Message</button>`:''}</div>
@@ -5321,11 +5393,11 @@ function renderConversation(){
   const isBlocked=!!(state.myBlocks&&state.myBlocks.has(otherId));
   return `
     <div class="conv-header">
-      <button class="back-btn" onclick="goBack()">‹</button>
+      <button class="back-btn" onclick="goBack()" aria-label="Back">‹</button>
       <div class="conv-av" style="background:var(--red);color:#fff">${initials(name)}</div>
       <div class="conv-info"><div class="conv-name-row"><div class="conv-name">${name}</div></div><div class="conv-meta">Direct message</div></div>
       <div style="position:relative">
-        <button onclick="toggleConvMenu()" style="background:transparent;border:none;color:var(--mid);font-size:18px;cursor:pointer;padding:6px">⋮</button>
+        <button onclick="toggleConvMenu()" aria-label="Conversation options" style="background:transparent;border:none;color:var(--mid);font-size:18px;cursor:pointer;padding:6px">⋮</button>
         <div id="convMenu" style="display:none;position:absolute;right:0;top:32px;background:var(--dark2);border:1px solid var(--dark3);border-radius:8px;overflow:hidden;z-index:20;min-width:150px">
           <button onclick="closeConvMenu();openReportModal('profile',null,'${otherId}','this user')" style="display:block;width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;color:var(--white);font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif">🚩 Report ${name}</button>
           <button onclick="closeConvMenu();toggleBlockUser('${otherId}')" style="display:block;width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;color:var(--red);font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif;border-top:1px solid var(--dark3)">${isBlocked?'Unblock '+name:'🚫 Block '+name}</button>
@@ -5341,7 +5413,7 @@ function renderConversation(){
             if(rm){
               const reel=(state.dmReelCards||{})[rm[1]];
               const cap=reel?escapeHtml(reel.caption||''):'';
-              const img=reel&&reel.media_url?`<img src="${safeUrl(reel.media_url)}" style="width:100%;border-radius:10px 10px 0 0;display:block" loading="lazy">`:'';
+              const img=reel&&reel.media_url?`<img src="${safeUrl(reel.media_url)}" alt="${cap||'Shared reel'}" style="width:100%;border-radius:10px 10px 0 0;display:block" loading="lazy">`:'';
               const inner=reel
                 ? `${img}<div style="padding:8px 10px"><div style="font-size:10px;color:var(--mid);margin-bottom:2px">📨 Shared reel</div><div style="font-size:12px;color:var(--white)">${cap||'(no caption)'}</div></div>`
                 : `<div style="padding:10px 12px;font-size:12px;color:var(--mid)">📨 Shared reel (tap to view)</div>`;
@@ -5382,7 +5454,7 @@ function renderConversation(){
     ${isBlocked?'':`
     <div class="composer">
       <input class="comp-input" id="msgInput" placeholder="Message ${name}..." onkeydown="if(event.key==='Enter')sendMsg()">
-      <button class="comp-send" onclick="sendMsg()">↑</button>
+      <button class="comp-send" onclick="sendMsg()" aria-label="Send message">↑</button>
     </div>`}
   `;
 }
@@ -5599,7 +5671,7 @@ function renderEventDraftDetail(e){
   const canPublish=canPublishDraft(e);
   const isOwner=role==='gym'&&e.hostGym===ROLE_PROFILES[role]?.userId;
   return `
-    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Draft Card</div><div style="width:38px"></div></div>
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Draft Card</div><div style="width:38px"></div></div>
     <div class="inner-scroll">
       <div class="hero" style="height:auto;padding-bottom:8px">
         <div class="hero-bg-text">DRAFT</div>
@@ -5878,7 +5950,7 @@ function renderEventPublishedDetail(e){
   const host=state.users[e.hostGym];
   const showOfficials=role!=='fan';
   return `
-    <div class="nav-bar"><button class="back-btn" onclick="goBack()">‹</button><div class="nav-title">Event</div><div style="width:38px"></div></div>
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">Event</div><div style="width:38px"></div></div>
     <div class="inner-scroll">
       <div class="hero" style="height:auto;padding-bottom:8px">
         <div class="hero-bg-text">FN${e.id.replace('e','')}</div>
@@ -7028,7 +7100,7 @@ function renderCreatorHome(){
           const nm=escapeHtml((prof.display_name||prof.username)||'Creator');
           const img=r.media_url?(r.media_type==='video'
             ? `<video src="${safeUrl(r.media_url)}#t=0.1" muted playsinline preload="metadata" style="width:100%;height:96px;object-fit:cover;display:block;background:#000"></video>`
-            : `<img src="${safeUrl(r.media_url)}" style="width:100%;height:96px;object-fit:cover;display:block" loading="lazy">`):`<div style="width:100%;height:96px;background:linear-gradient(135deg,#1a0000,#0d1a2d);display:flex;align-items:center;justify-content:center;font-size:24px">🥊</div>`;
+            : `<img src="${safeUrl(r.media_url)}" alt="Reel by ${nm}" style="width:100%;height:96px;object-fit:cover;display:block" loading="lazy">`):`<div style="width:100%;height:96px;background:linear-gradient(135deg,#1a0000,#0d1a2d);display:flex;align-items:center;justify-content:center;font-size:24px">🥊</div>`;
           return `
           <div onclick="setTab('reels')" style="min-width:150px;max-width:150px;flex-shrink:0;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);overflow:hidden;cursor:pointer">
             ${img}
@@ -7072,7 +7144,7 @@ function renderCreatorHome(){
       let cards='';
       gyms.forEach(g=>{
         cards+=`<div onclick="openGymPage('${g.id}')" style="min-width:130px;max-width:130px;flex-shrink:0;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:14px 10px;text-align:center;cursor:pointer">
-          <div style="width:48px;height:48px;border-radius:12px;margin:0 auto 8px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:22px">${g.avatar_url?`<img src="${safeUrl(g.avatar_url)}" style="width:48px;height:48px;border-radius:12px;object-fit:cover">`:'🏋'}</div>
+          <div style="width:48px;height:48px;border-radius:12px;margin:0 auto 8px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:22px">${g.avatar_url?`<img src="${safeUrl(g.avatar_url)}" alt="${escapeHtml(g.name||'Gym')} logo" style="width:48px;height:48px;border-radius:12px;object-fit:cover">`:'🏋'}</div>
           <div style="font-size:12px;font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(g.name)}</div>
           <div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.5px">Gym</div>
         </div>`;
@@ -8219,15 +8291,15 @@ function renderReelsFeed(role){
             ${r.media_url?(r.media_type==='video'
               ? `<div style="position:relative;margin-bottom:10px">
                   <video id="vid_${r.id}" src="${safeUrl(r.media_url)}" muted autoplay loop playsinline preload="metadata" style="width:100%;border-radius:var(--r);display:block;background:#000"></video>
-                  <button onclick="toggleReelMute('${r.id}',event)" id="mute_${r.id}" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.65);color:#fff;border:none;width:38px;height:38px;border-radius:50%;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center">🔇</button>
+                  <button onclick="toggleReelMute('${r.id}',event)" id="mute_${r.id}" aria-label="Toggle video sound" style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,.65);color:#fff;border:none;width:38px;height:38px;border-radius:50%;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center">🔇</button>
                 </div>`
-              : `<img src="${safeUrl(r.media_url)}" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block" loading="lazy">`):''}
+              : `<img src="${safeUrl(r.media_url)}" alt="Reel by ${name}" style="width:100%;border-radius:var(--r);margin-bottom:10px;display:block" loading="lazy">`):''}
             ${r.caption?`<div style="font-size:13px;color:var(--lighter);line-height:1.5;margin-bottom:10px">${escapeHtml(r.caption)}</div>`:''}
             <div style="display:flex;gap:16px;align-items:center">
-              <button id="like_${r.id}" onclick="toggleLike('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:${r.likedByMe?'var(--red)':'var(--light)'};font-family:'DM Sans',sans-serif">${r.likedByMe?'❤️':'🤍'} ${r.likeCount||0}</button>
+              <button id="like_${r.id}" onclick="toggleLike('${r.id}')" aria-label="${r.likedByMe?'Unlike':'Like'}" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:${r.likedByMe?'var(--red)':'var(--light)'};font-family:'DM Sans',sans-serif">${r.likedByMe?'❤️':'🤍'} ${r.likeCount||0}</button>
               <button onclick="toggleComments('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:var(--light);font-family:'DM Sans',sans-serif">💬 Comments${comments.length?(' ('+comments.length+')'):''}</button>
               <button onclick="openShareReel('${r.id}')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:var(--light);font-family:'DM Sans',sans-serif">📨 Send</button>
-              ${(myId&&r.author_id!==myId)?`<button onclick="openReportModal('reel','${r.id}','${r.author_id}','this reel')" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:var(--mid);font-family:'DM Sans',sans-serif;margin-left:auto">🚩</button>`:''}
+              ${(myId&&r.author_id!==myId)?`<button onclick="openReportModal('reel','${r.id}','${r.author_id}','this reel')" aria-label="Report this reel" style="background:transparent;border:none;cursor:pointer;font-size:12px;color:var(--mid);font-family:'DM Sans',sans-serif;margin-left:auto">🚩</button>`:''}
             </div>
             ${showComments?`
               <div style="margin-top:12px;border-top:1px solid var(--dark3);padding-top:12px">
@@ -9824,9 +9896,18 @@ render();
       }catch(e){console.log('profile ensure error:',e&&e.message);}
       // Load the saved profile photo + self-listed role (if any) after refresh.
       // Fully non-fatal: any failure here just means we fall back to metadata.
-      db.from('profiles').select('display_name,avatar_url,role,role_info,is_admin,is_moderator').eq('id',res.data.user.id).limit(1).then(function(pr){
+      db.from('profiles').select('display_name,avatar_url,role,role_info,is_admin,is_moderator,is_active').eq('id',res.data.user.id).limit(1).then(function(pr){
         var row=pr&&pr.data&&pr.data[0];
         if(row){
+          // A deactivated account (self-service "Delete my account") must not
+          // keep working just because a session token is still valid — force
+          // sign-out here instead of letting them continue past this point.
+          if(row.is_active===false){
+            alert('This account has been deactivated. Contact support if this was a mistake.');
+            try{localStorage.removeItem(STORAGE_KEY);}catch(e){}
+            db.auth.signOut().then(function(){location.reload();});
+            return;
+          }
           if(row.avatar_url)window.ruAvatarUrl=row.avatar_url;
           if(row.display_name)window.ruName=row.display_name;
           window.ruRole=row.role||null;
