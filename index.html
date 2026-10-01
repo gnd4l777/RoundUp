@@ -2733,8 +2733,10 @@ function loadDirectory(){
     }).catch(function(e){console.log('loadDirectory venues error:',e&&e.message);if(state.currentTab==='find')render();});
 }
 
-function renderDirectory(){
-  if(!window._dirLoaded){ window._dirLoaded=true; setTimeout(loadDirectory,0); }
+// Shared by renderDirectory() (full render) and renderDirectoryResultsBody()
+// (partial re-render on search keystrokes) so the two never drift apart on
+// what counts as "in the current category".
+function computeDirectoryLists(){
   // Normalise on read: a returning user (or an async saveState firing while a
   // now-removed chip was selected) could have an unrecognised value persisted in
   // localStorage. Treat anything unknown as 'all' so nobody lands on an
@@ -2754,6 +2756,101 @@ function renderDirectory(){
   const venues=state.dirVenues||[];
   const showVenues=(filter==='all'||filter==='venues');
   const venuesToShow=showVenues?venues:[];
+  return {filter,want,all,list,gyms,gymsToShow,venues,venuesToShow};
+}
+
+function renderDirPersonCard(p){
+  const name=escapeHtml(p.display_name||p.username||'Creator');
+  const info=p.role_info||{};
+  let sub='';
+  if(p.role==='fighter')sub=[info.sport,info.weight?info.weight+' lbs':'',info.gym&&info.gym!=='Independent / not listed yet'?info.gym:''].filter(Boolean).join(' · ');
+  else if(p.role==='gym')sub=[info.location,info.sports].filter(Boolean).join(' · ');
+  else if(p.role==='coach')sub=[info.specialty,info.sport].filter(Boolean).join(' · ');
+  else if(p.role==='official')sub=[info.type,info.sport].filter(Boolean).join(' · ');
+  else if(p.role==='sponsor')sub=[info.brand,info.looking].filter(Boolean).join(' · ');
+  const roleColor={fighter:'var(--red)',gym:'var(--gold)',coach:'var(--purple)',official:'var(--green)',sponsor:'var(--blue)'}[p.role]||'var(--light)';
+  return `
+    <div onclick="openDirProfile('${p.id}')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
+      ${avatarHtml(p,name,44)}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${name}</span><span style="font-size:9px;color:${roleColor};font-weight:600;text-transform:uppercase;letter-spacing:.5px">${ROLE_LABELS[p.role]||p.role}</span></div>
+        <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub||'Self-listed'}</div>
+      </div>
+      <span style="color:var(--mid);font-size:16px">›</span>
+    </div>`;
+}
+
+function renderDirGymCard(g){
+  const sub=[g.location,g.sports].filter(Boolean).join(' · ');
+  return `
+    <div onclick="openGymPage('${g.id}')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
+      <div style="width:44px;height:44px;border-radius:12px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">🏋</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${escapeHtml(g.name)}</span><span style="font-size:9px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Gym</span></div>
+        <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(sub||'Self-listed gym')}</div>
+      </div>
+      <span style="color:var(--mid);font-size:16px">›</span>
+    </div>`;
+}
+
+function renderDirVenueCard(v){
+  const sub=[v.city,v.region].filter(Boolean).join(', ');
+  return `
+    <div onclick="openVenuePage('${v.id}')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
+      <div style="width:44px;height:44px;border-radius:12px;background:rgba(42,127,232,.15);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">🏟</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${escapeHtml(v.name)}</span><span style="font-size:9px;color:var(--blue);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Venue</span></div>
+        <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(sub||'Self-listed venue')}</div>
+      </div>
+      <span style="color:var(--mid);font-size:16px">›</span>
+    </div>`;
+}
+
+// Client-side name search, applied on top of whatever category chip is
+// active. Re-rendered on every keystroke into #dirResultsArea only (not a
+// full render()) so the input doesn't lose focus/caret position while typing.
+// Matches against each entity's *displayed* name: profile display_name or
+// username, gym name, venue name. Substring, case-insensitive. No new
+// Supabase query — filters the data loadDirectory() already fetched.
+function renderDirectoryResultsBody(){
+  const {filter,list,gymsToShow,venuesToShow}=computeDirectoryLists();
+  const q=(state.dirSearch||'').trim().toLowerCase();
+  const personMatches=(p)=>!q||(p.display_name||'').toLowerCase().includes(q)||(p.username||'').toLowerCase().includes(q);
+  const nameMatches=(n)=>!q||(n||'').toLowerCase().includes(q);
+
+  const searchedGyms=gymsToShow.filter(g=>nameMatches(g.name));
+  const searchedVenues=venuesToShow.filter(v=>nameMatches(v.name));
+  const searchedList=(filter==='gyms'||filter==='venues')?[]:list.filter(personMatches);
+
+  if(q&&searchedGyms.length===0&&searchedVenues.length===0&&searchedList.length===0){
+    return `<div class="empty"><div class="empty-icon">🔎</div><div class="empty-title">No matches</div><div class="empty-text">Nothing matches "${escapeHtml(state.dirSearch)}". Try a different name.</div><button class="empty-btn" onclick="clearDirectorySearch()">Clear search</button></div>`;
+  }
+
+  return `
+    <div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px">
+      ${searchedGyms.map(renderDirGymCard).join('')}
+      ${searchedVenues.map(renderDirVenueCard).join('')}
+      ${searchedList.map(renderDirPersonCard).join('')}
+    </div>`;
+}
+
+function filterDirectory(val){
+  state.dirSearch=val;
+  const body=document.getElementById('dirResultsArea');
+  if(body)body.innerHTML=renderDirectoryResultsBody();
+}
+
+function clearDirectorySearch(){
+  state.dirSearch='';
+  const input=document.getElementById('dirSearchInput');
+  if(input)input.value='';
+  const body=document.getElementById('dirResultsArea');
+  if(body)body.innerHTML=renderDirectoryResultsBody();
+}
+
+function renderDirectory(){
+  if(!window._dirLoaded){ window._dirLoaded=true; setTimeout(loadDirectory,0); }
+  const {filter,want,all,list,gyms,gymsToShow,venues,venuesToShow}=computeDirectoryLists();
 
   const chips=[['all','All'],['fighters','Fighters'],['gyms','Gyms'],['venues','Venues'],['coaches','Coaches'],['officials','Officials'],['sponsors','Sponsors'],['court','Court Sports']]
     .map(([f,lbl])=>`<div class="disco-chip ${filter===f?'active':''}" onclick="setFindFilter('${f}')">${lbl}${(f==='court')?' · soon':''}</div>`).join('');
@@ -2786,61 +2883,10 @@ function renderDirectory(){
     return head+`<div class="empty"><div class="empty-icon">🔎</div><div class="empty-title">Nobody here yet</div><div class="empty-text">No one has listed themselves${want?(' as a '+want):''} yet. Add your own role from your Profile to be the first.</div><button class="empty-btn" onclick="setTab('profile')">Set my role</button></div>`;
   }
 
-  const card=(p)=>{
-    const name=escapeHtml(p.display_name||p.username||'Creator');
-    const info=p.role_info||{};
-    let sub='';
-    if(p.role==='fighter')sub=[info.sport,info.weight?info.weight+' lbs':'',info.gym&&info.gym!=='Independent / not listed yet'?info.gym:''].filter(Boolean).join(' · ');
-    else if(p.role==='gym')sub=[info.location,info.sports].filter(Boolean).join(' · ');
-    else if(p.role==='coach')sub=[info.specialty,info.sport].filter(Boolean).join(' · ');
-    else if(p.role==='official')sub=[info.type,info.sport].filter(Boolean).join(' · ');
-    else if(p.role==='sponsor')sub=[info.brand,info.looking].filter(Boolean).join(' · ');
-    const roleColor={fighter:'var(--red)',gym:'var(--gold)',coach:'var(--purple)',official:'var(--green)',sponsor:'var(--blue)'}[p.role]||'var(--light)';
-    return `
-      <div onclick="openDirProfile('${p.id}')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
-        ${avatarHtml(p,name,44)}
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${name}</span><span style="font-size:9px;color:${roleColor};font-weight:600;text-transform:uppercase;letter-spacing:.5px">${ROLE_LABELS[p.role]||p.role}</span></div>
-          <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub||'Self-listed'}</div>
-        </div>
-        <span style="color:var(--mid);font-size:16px">›</span>
-      </div>`;
-  };
-
-  const gymCard=(g)=>{
-    const sub=[g.location,g.sports].filter(Boolean).join(' · ');
-    return `
-      <div onclick="openGymPage('${g.id}')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
-        <div style="width:44px;height:44px;border-radius:12px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">🏋</div>
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${escapeHtml(g.name)}</span><span style="font-size:9px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Gym</span></div>
-          <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(sub||'Self-listed gym')}</div>
-        </div>
-        <span style="color:var(--mid);font-size:16px">›</span>
-      </div>`;
-  };
-
-  const venueCard=(v)=>{
-    const sub=[v.city,v.region].filter(Boolean).join(', ');
-    return `
-      <div onclick="openVenuePage('${v.id}')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
-        <div style="width:44px;height:44px;border-radius:12px;background:rgba(42,127,232,.15);color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">🏟</div>
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${escapeHtml(v.name)}</span><span style="font-size:9px;color:var(--blue);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Venue</span></div>
-          <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(sub||'Self-listed venue')}</div>
-        </div>
-        <span style="color:var(--mid);font-size:16px">›</span>
-      </div>`;
-  };
-
   return `
-    <div class="search-bar"><span style="font-size:14px">🔎</span><input class="search-input" placeholder="Browse RoundUp members..."></div>
+    <div class="search-bar"><span style="font-size:14px">🔎</span><input id="dirSearchInput" class="search-input" placeholder="Search by name..." value="${escapeHtml(state.dirSearch||'')}" oninput="filterDirectory(this.value)"></div>
     ${head}
-    <div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px">
-      ${gymsToShow.map(gymCard).join('')}
-      ${venuesToShow.map(venueCard).join('')}
-      ${(filter==='gyms'||filter==='venues')?'':list.map(card).join('')}
-    </div>
+    <div id="dirResultsArea">${renderDirectoryResultsBody()}</div>
     <div class="pb-safe"></div>`;
 }
 
