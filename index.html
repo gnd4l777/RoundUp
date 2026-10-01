@@ -3148,7 +3148,10 @@ async function loadGeneralEvents(){
     state.generalEventsError=true;
   }
   state.generalEventsLoading=false;
-  if(state.currentTab==='events')render();
+  // Also re-render on 'home' — the home screen's "Upcoming Events" module
+  // (renderCreatorHome) triggers this same loader and needs the repaint too,
+  // same as the 'events' tab itself.
+  if(state.currentTab==='events'||state.currentTab==='home')render();
 }
 
 function renderGeneralEventCard(e){
@@ -7087,9 +7090,9 @@ function renderOSACChecklist(e){
 
 // ── Unified Creator Account / Credential Unlock Model ──
 function renderCreatorHome(){
-  // Soft-launch home. There are no demo fighters/gyms/events yet, so instead of
-  // empty rows we show: a welcome hero, a peek at the live reels feed (real
-  // activity), and a clearly-labeled "coming soon" roadmap.
+  // Soft-launch home. No demo data anywhere: a welcome hero, a peek at the
+  // live reels feed, a peek at real upcoming events (events_general), and a
+  // clearly-labeled "coming soon" section for what isn't built yet.
   const reels=(state.dbReels||[]).slice(0,6);
   if(!window._reelsLoaded){ window._reelsLoaded=true; setTimeout(loadReelsFromDB,0); }
 
@@ -7127,7 +7130,6 @@ function renderCreatorHome(){
         <div style="font-size:12px;color:rgba(255,255,255,.7);margin:6px 0 4px;line-height:1.5;max-width:300px">Tulsa's home for sports events — starting with combat sports. Post, follow, and connect.</div>
         <div class="hero-cta">
           <button class="btn-primary" onclick="setTab('reels')">Watch Reels</button>
-          <button class="btn-secondary" onclick="openProfileMenu()">Set Up Profile</button>
         </div>
       </div>
     </div>
@@ -7136,30 +7138,28 @@ function renderCreatorHome(){
     ${reelsRow}
 
     ${(()=>{
-      // Popular right now — real members/gyms from the directory (no fake data).
-      if(!window._popLoaded){window._popLoaded=true;setTimeout(loadDirectory,0);}
-      const people=(state.directory||[]).slice(0,6);
-      const gyms=(state.dirGyms||[]).slice(0,4);
-      if(people.length===0 && gyms.length===0) return '';
-      let cards='';
-      gyms.forEach(g=>{
-        cards+=`<div onclick="openGymPage('${g.id}')" style="min-width:130px;max-width:130px;flex-shrink:0;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:14px 10px;text-align:center;cursor:pointer">
-          <div style="width:48px;height:48px;border-radius:12px;margin:0 auto 8px;background:rgba(245,166,35,.15);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:22px">${g.avatar_url?`<img src="${safeUrl(g.avatar_url)}" alt="${escapeHtml(g.name||'Gym')} logo" style="width:48px;height:48px;border-radius:12px;object-fit:cover">`:'🏋'}</div>
-          <div style="font-size:12px;font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(g.name)}</div>
-          <div style="font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.5px">Gym</div>
-        </div>`;
-      });
-      people.forEach(p=>{
-        const nm=escapeHtml((p.display_name||p.username)||'Creator');
-        const rc={fighter:'var(--red)',coach:'var(--purple)',official:'var(--green)',sponsor:'var(--blue)'}[p.role]||'var(--light)';
-        cards+=`<div onclick="openUserProfile('${p.id}')" style="min-width:130px;max-width:130px;flex-shrink:0;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:14px 10px;text-align:center;cursor:pointer">
-          <div style="display:flex;justify-content:center;margin-bottom:8px">${avatarHtml(p,nm,48)}</div>
-          <div style="font-size:12px;font-weight:600;color:var(--white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nm}</div>
-          <div style="font-size:10px;color:${rc};text-transform:uppercase;letter-spacing:.5px">${p.role?(ROLE_LABELS[p.role]||p.role):'Creator'}</div>
-        </div>`;
-      });
-      return `<div class="sec-head" style="margin-top:6px"><div class="sec-title">Popular Right Now</div><div class="sec-link" onclick="setTab('find')">Browse all →</div></div>
-        <div class="h-scroll">${cards}</div>`;
+      // Upcoming Events — real published rows from events_general, via the same
+      // loadGeneralEvents()/renderGeneralEventCard() the Events tab itself uses
+      // (see renderGeneralEvents() above). Replaces the old "Popular Right Now"
+      // directory teaser: that module overlapped with the live-subcategory
+      // tiles in "What's Happening" below (both routed to Find → Fighters),
+      // while events are the thing RoundUp is actually built around, so this
+      // reads better here. No demo data — honest loading/empty states instead.
+      if(!window._geLoaded){window._geLoaded=true;setTimeout(loadGeneralEvents,0);}
+      const evts=(state.generalEvents||[]).filter(e=>e.status==='published').slice(0,4);
+      const head=`<div class="sec-head" style="margin-top:6px"><div class="sec-title">Upcoming Events</div><div class="sec-link" onclick="setTab('events')">See all →</div></div>`;
+      if(state.generalEventsLoading && evts.length===0 && !state.generalEventsError){
+        return head+`<div style="padding:0 18px"><div class="empty" style="padding:24px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading events…</div></div></div>`;
+      }
+      if(evts.length===0){
+        return head+`<div style="padding:0 18px"><div style="background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);padding:18px;text-align:center">
+          <div style="font-size:24px;margin-bottom:6px">🎉</div>
+          <div style="font-size:13px;font-weight:600;color:var(--white);margin-bottom:4px">No events yet — be the first</div>
+          <div style="font-size:11px;color:var(--mid);margin-bottom:12px;line-height:1.5">Post a tournament, fundraiser, or pickup game to get it in front of Tulsa.</div>
+          <button class="btn-primary" onclick="setTab('events')">Post an Event</button>
+        </div></div>`;
+      }
+      return head+`<div style="padding:0 18px;display:flex;flex-direction:column;gap:8px">${evts.map(renderGeneralEventCard).join('')}</div>`;
     })()}
 
     ${(()=>{
@@ -7208,10 +7208,6 @@ function renderCreatorHome(){
           <span style="background:var(--dark4);color:var(--mid);font-size:9px;font-weight:600;padding:3px 8px;border-radius:8px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;align-self:center">Soon</span>
         </div>`).join('')}
     </div>
-    <div style="padding:14px 18px 0">
-      <button class="btn-secondary" style="width:100%;padding:11px" onclick="setTab('events')">See the full roadmap →</button>
-    </div>
-
     <div class="pb-safe"></div>
   `;
 }
