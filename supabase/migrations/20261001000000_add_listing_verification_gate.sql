@@ -59,6 +59,55 @@
 --     (profile_id, requested_role) pair" — an old approved listing now
 --     keeps showing publicly while a newer resubmission for the SAME role
 --     sits pending, rather than blanking out immediately. See section 4.
+--     ⚠️ CORRECTED BELOW (Round 2, 2026-10-02): this Fix 4 only changed the
+--     role_verified BOOLEAN. It did NOT change what role_info CONTENT other
+--     users were shown — the public directory/profile still read live
+--     profiles.role_info, so the moment a role had been approved once, every
+--     future edit to it published instantly with zero re-review, forever.
+--     That is not what Kaden was told shipped. See the Round 2 block below.
+-- ============================================================================
+--
+-- FOLLOW-UP — ROUND 2 — 2026-10-02 (review of merged PR #46 found 4 more real
+-- problems in this still-unapplied draft; fixed in place again, same as the
+-- pass above, since nothing has been applied to a live database yet):
+--   Fix 1 (real bug, most severe): admin_approve_unsubmitted_role() used a
+--     non-strict `select ... into`, which does not raise on zero matching
+--     rows — it silently left v_role_info NULL and inserted an APPROVED row
+--     for a role the target profile no longer actually held (e.g. the admin's
+--     queue was stale, or the profile changed/cleared its role in between).
+--     That created a dormant permanent approval: if the profile ever re-set
+--     that exact role later, they'd be instantly verified with zero review.
+--     Fixed with `select ... into strict` + a caught no_data_found exception
+--     (section 3) that now rejects the call with a clear error instead.
+--   Fix 2 (regression): index.html's loadAdminVerifyQueue() had its
+--     submitter-name lookup changed from a targeted `.in('id', ids)` query to
+--     a broad `.not('role','is',null).limit(1000)` scan, so any request whose
+--     submitter had since cleared/changed their role (or gone inactive) fell
+--     out of that scan and silently rendered 'User' instead of their real
+--     name. Reverted to a targeted lookup, client-side only — no schema
+--     change in this file.
+--   Fix 3 (latent bug): the "never submitted" query in loadAdminVerifyQueue()
+--     had no filter excluding the legacy role='gym' value, so such a profile
+--     could land in that admin queue and throw "Invalid role: gym" on both
+--     Approve and Reject (admin_approve_unsubmitted_role only accepts
+--     fighter/coach/official/sponsor), with no way to clear it. Currently
+--     latent (zero such profiles exist live) — fixed with the same
+--     role != 'gym' exclusion loadDirectory() already uses, client-side only.
+--   Fix 4 (design correction, Kaden's explicit decision, confirmed
+--     2026-10-02): closes the gap flagged above — role_verified (the
+--     boolean) was already "any approved request ever", but the actual
+--     CONTENT shown to other users was still live profiles.role_info, so an
+--     edit to an already-approved role published instantly with no
+--     re-review. Added a new computed `public_role_info` column to
+--     profiles_public (section 4) that resolves to the role_info of the
+--     single most recent APPROVED role_verification_requests row for the
+--     profile's current role — this is the real "last approved snapshot"
+--     other users see. The profile owner's own view of their own role still
+--     reads live profiles.role_info (editing is never blocked by this —
+--     editing just doesn't affect what the public sees until the new
+--     submission is approved). index.html's directory cards and other-user
+--     profile view now read public_role_info instead of role_info; the
+--     owner's own view of their own profile is unchanged.
 -- ============================================================================
 --
 -- Purpose: VERIFICATION-GATE-DESIGN.md, approved 2026-10-01. Kaden's three
@@ -517,9 +566,24 @@ begin
     raise exception 'A verification request already exists for this profile and role — refresh the queue and use the normal approve/reject action on it instead.';
   end if;
 
-  select role_info into v_role_info
-  from public.profiles
-  where id = target_profile_id and role = target_role;
+  -- Round 2 fix (2026-10-02, Fix 1 — real bug): a bare `select ... into`
+  -- (non-strict) does NOT raise on zero matching rows — it silently leaves
+  -- v_role_info NULL and keeps executing. If the profile's role changed (or
+  -- was cleared) between the admin loading this queue and tapping Approve,
+  -- that meant this still inserted an APPROVED row for a role the profile no
+  -- longer holds, with empty role_info — a dormant permanent approval. If
+  -- that person ever re-set that exact role later, they'd be instantly (and
+  -- wrongly) shown as verified with zero review. `into strict` raises
+  -- no_data_found instead, caught below and turned into a clear error the
+  -- admin UI surfaces (adminApproveUnsubmittedRole()'s catch block shows
+  -- e.message directly) rather than silently proceeding.
+  begin
+    select role_info into strict v_role_info
+    from public.profiles
+    where id = target_profile_id and role = target_role;
+  exception when no_data_found then
+    raise exception 'This profile no longer holds the % role — refresh the queue and try again.', target_role;
+  end;
 
   insert into public.role_verification_requests
     (profile_id, requested_role, role_info, status, reviewed_by, reviewed_at, note)
@@ -529,7 +593,7 @@ end;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 4) profiles_public — add a computed role_verified column.
+-- 4) profiles_public — add computed role_verified + public_role_info columns.
 --    Must come AFTER role_verification_requests exists (section 3 above):
 --    this is a plain SQL view, parse-validated against the schema at CREATE
 --    time, so defining it before the table it references would abort with
@@ -539,7 +603,9 @@ $$;
 --
 --    Preserves every column the existing view already has (id, display_name,
 --    username, avatar_url, role, role_info — see 20260906010000) and adds
---    exactly one new one.
+--    two new ones: role_verified (a boolean, Fix 4 original pass) and
+--    public_role_info (a jsonb snapshot, Fix 4 Round 2 — see the FOLLOW-UP —
+--    ROUND 2 block near the top of this file for why both were needed).
 --
 --    Fix 4 (2026-10-02, Issue D) — Kaden's decision, confirmed directly and
 --    final, not a guess: role_verified is true whenever ANY
@@ -554,6 +620,19 @@ $$;
 --    switching to a genuinely different role, which naturally has no
 --    approved row yet) changes visibility. Do not revert this to a
 --    "latest row wins" computation without re-confirming with Kaden first.
+--
+--    Round 2 correction (2026-10-02): the paragraph above describes
+--    role_verified, a boolean — it does NOT, on its own, keep the old
+--    approved listing's CONTENT visible while a resubmission is pending,
+--    because this view also exposed live p.role_info as the `role_info`
+--    column, and client code read that column for both verified-badge
+--    purposes and for displaying the actual details. The two are different
+--    things: a true role_verified badge next to profile details that were
+--    silently live-updating the instant the owner edited them, re-review or
+--    not. public_role_info (below) is the fix for the content half of this —
+--    it is the actual "last approved snapshot" other users should see;
+--    role_info remains live and is now only meant for the profile owner's
+--    own view/edit of their own role.
 --
 --    ⚠️ MUST ALSO PRESERVE `where is_active` — this view's definition was
 --    already updated once since 20260906010000, by 20260925020000 (account
@@ -598,7 +677,29 @@ select
     select 1
     from public.role_verification_requests rvr
     where rvr.profile_id = p.id and rvr.requested_role = p.role and rvr.status = 'approved'
-  ) as role_verified
+  ) as role_verified,
+  -- Round 2 fix (2026-10-02, Fix 4 continued — this is the part that was
+  -- actually missing, see the corrected header note above this view). The
+  -- CONTENT other users see for this role must be the last-APPROVED
+  -- snapshot, not live p.role_info — otherwise role_verified=true plus a
+  -- live role_info column meant any edit to an already-verified role
+  -- published instantly with zero re-review, forever, the moment that role
+  -- had been approved once. This subquery picks the role_info value from the
+  -- single most recent APPROVED request for the profile's CURRENT role; a
+  -- newer pending resubmission for the same role does not change this until
+  -- an admin approves it (the subquery always re-reads "most recent
+  -- approved", so approval needs no separate publish step). Client code
+  -- reading another user's role details (directory cards, other-user profile
+  -- view) must read THIS column, not p.role_info. The profile owner's own
+  -- view/edit of their own role continues to read live profiles.role_info,
+  -- unaffected by this column.
+  (
+    select rvr.role_info
+    from public.role_verification_requests rvr
+    where rvr.profile_id = p.id and rvr.requested_role = p.role and rvr.status = 'approved'
+    order by rvr.created_at desc
+    limit 1
+  ) as public_role_info
 from public.profiles p
 where p.is_active;
 
