@@ -1255,14 +1255,42 @@ async function saveRole(roleId){
     const upd=await db.from('profiles').update({role:roleId,role_info:info}).eq('id',user.id);
     if(upd.error)throw upd.error;
     window.ruRole=roleId; window.ruRoleInfo=info;
+    // Verification gate (2026-10-01): a role change/resubmission is invisible
+    // in the public directory (profiles_public.role_verified) until an admin
+    // approves this new request — see supabase/migrations/
+    // 20261001000000_add_listing_verification_gate.sql. Deliberately
+    // non-fatal: if this insert fails (e.g. the migration isn't applied yet),
+    // the role itself still saved above, same fail-soft approach the rest of
+    // this app uses for not-yet-live tables.
+    try{
+      const insReq=await db.from('role_verification_requests').insert({profile_id:user.id,requested_role:roleId,role_info:info,status:'pending'});
+      if(insReq.error)console.log('role_verification_requests insert error:',insReq.error.message);
+    }catch(e2){console.log('role_verification_requests insert error:',e2&&e2.message);}
+    if(typeof loadMyRoleVerification==='function')loadMyRoleVerification();
     const rm=document.getElementById('ruRoleForm'); if(rm)rm.style.display='none';
     render();
-    alert('You are now listed as a '+ROLE_LABELS[roleId]+' (self-listed).');
+    alert('You are now listed as a '+ROLE_LABELS[roleId]+' (self-listed). An admin needs to approve this before it shows in the public directory.');
   }catch(e){
     console.log('saveRole error:',e);
     msg.textContent='Could not save. Please check your entries and try again.';
     btn.disabled=false;btn.textContent='Save';
   }
+}
+
+// Verification gate (2026-10-01): load the signed-in user's own latest
+// role_verification_requests row (RLS lets a user always see their own rows
+// regardless of status) so their profile can show an honest "pending
+// verification" / "verified" / "not approved" indicator for their current
+// role. Fails soft (console.log only) if the table isn't live yet.
+async function loadMyRoleVerification(){
+  const db=window.ruDB; if(!db)return;
+  const {data:{user}}=await db.auth.getUser();
+  if(!user)return;
+  try{
+    const {data}=await db.from('role_verification_requests').select('id,requested_role,status,created_at').eq('profile_id',user.id).order('created_at',{ascending:false}).limit(1);
+    state.myRoleVerification=(data&&data[0])||null;
+    if(state.currentTab==='profile')render();
+  }catch(e){console.log('loadMyRoleVerification error:',e&&e.message);}
 }
 
 async function clearRole(){
@@ -1634,6 +1662,8 @@ function renderVenuePage(){
         <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;color:var(--white);line-height:1">${escapeHtml(v.name)}</div>
         ${cityLine?`<div style="font-size:13px;color:var(--lighter);margin-top:4px">📍 ${escapeHtml(cityLine)}</div>`:''}
         <div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:var(--dark3);padding:4px 12px;border-radius:12px"><span style="font-size:11px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:.5px">Venue</span><span style="font-size:9px;color:var(--mid)">● self-listed, not verified by RoundUp</span></div>
+        ${isOwner&&v.status==='pending'?`<div style="margin-top:10px;display:inline-block;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.3);color:var(--gold);font-size:11px;font-weight:600;padding:6px 14px;border-radius:10px">⏳ Pending admin review — only you can see this venue until it's approved</div>`:''}
+        ${isOwner&&v.status==='rejected'?`<div style="margin-top:10px;display:inline-block;background:rgba(232,37,26,.08);border:1px solid rgba(232,37,26,.3);color:var(--red);font-size:11px;font-weight:600;padding:6px 14px;border-radius:10px">✗ Not approved — only you can see this venue</div>`:''}
         ${isOwner?`<div style="margin-top:14px"><button onclick="openVenueForm('${v.id}')" style="background:var(--dark3);color:var(--white);border:none;padding:9px 26px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Edit venue</button></div>`:''}
       </div>
 
@@ -1832,6 +1862,8 @@ function renderGymPage(){
         <div style="font-size:13px;color:var(--lighter);margin-top:4px">📍 ${escapeHtml(g.location||'')}</div>
         ${g.sports?`<div style="margin-top:6px"><span style="display:inline-block;background:var(--dark3);color:var(--lighter);font-size:10px;padding:3px 10px;border-radius:10px">${escapeHtml(g.sports)}</span></div>`:''}
         <div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:var(--dark3);padding:4px 12px;border-radius:12px"><span style="font-size:11px;font-weight:600;color:var(--gold);text-transform:uppercase;letter-spacing:.5px">Gym</span><span style="font-size:9px;color:var(--mid)">● self-listed</span></div>
+        ${isOwner&&g.status==='pending'?`<div style="margin-top:10px;display:inline-block;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.3);color:var(--gold);font-size:11px;font-weight:600;padding:6px 14px;border-radius:10px">⏳ Pending admin review — only you can see this gym until it's approved</div>`:''}
+        ${isOwner&&g.status==='rejected'?`<div style="margin-top:10px;display:inline-block;background:rgba(232,37,26,.08);border:1px solid rgba(232,37,26,.3);color:var(--red);font-size:11px;font-weight:600;padding:6px 14px;border-radius:10px">✗ Not approved — only you can see this gym</div>`:''}
         ${isOwner?`<div style="margin-top:14px"><button onclick="openGymForm('${g.id}')" style="background:var(--dark3);color:var(--white);border:none;padding:9px 26px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Edit gym</button></div>`:`
           ${(()=>{
             const members=state.viewGymMembers||{approved:[],pending:[]};
@@ -2715,7 +2747,7 @@ function loadDirectory(){
   state.dirError=false;
   // People with a self-listed role (excluding the old 'gym' role — gyms are
   // now their own entity, loaded separately below).
-  db.from('profiles_public').select('id,display_name,username,avatar_url,role,role_info').not('role','is',null).limit(500)
+  db.from('profiles_public').select('id,display_name,username,avatar_url,role,role_info,role_verified').not('role','is',null).limit(500)
     .then(function(res){
       state.directory=(res.data||[]).filter(p=>p.role!=='gym');
       state.dirLoading=false;
@@ -2749,7 +2781,16 @@ function computeDirectoryLists(){
   const all=state.directory||[];
   const filterMap={all:null,fighters:'fighter',gyms:'gym',coaches:'coach',officials:'official',sponsors:'sponsor'};
   const want=filterMap[filter];
-  const list=want?all.filter(p=>p.role===want):all;
+  // Verification gate (2026-10-01): a role-specific chip (Fighters, Coaches,
+  // Officials, Sponsors) only surfaces profiles whose CURRENT role has been
+  // admin-approved (profiles_public.role_verified) — an unverified role is
+  // not yet "visible as that role" per the design's hard-gate decision.
+  // "All" deliberately does NOT apply this filter: someone with an
+  // unverified role still appears there as a plain creator (judgment call —
+  // see PR description) rather than disappearing from the directory
+  // entirely; renderDirPersonCard() is what actually hides the role
+  // badge/subtitle for an unverified row.
+  const list=want?all.filter(p=>p.role===want&&p.role_verified):all;
   // Real gym entities (separate from people).
   const gyms=state.dirGyms||[];
   const showGyms=(filter==='all'||filter==='gyms');
@@ -2764,18 +2805,28 @@ function computeDirectoryLists(){
 function renderDirPersonCard(p){
   const name=escapeHtml(p.display_name||p.username||'Creator');
   const info=p.role_info||{};
+  // Verification gate (2026-10-01): only show the specific role badge/
+  // subtitle once profiles_public.role_verified is true for this profile.
+  // Someone with an unverified (not-yet-admin-approved) role still shows up
+  // in the directory — just as a plain creator, same as having no role at
+  // all — rather than disappearing entirely. See computeDirectoryLists()
+  // for the matching filter-chip behavior.
+  const verified=!!p.role_verified;
   let sub='';
-  if(p.role==='fighter')sub=[info.sport,info.weight?info.weight+' lbs':'',info.gym&&info.gym!=='Independent / not listed yet'?info.gym:''].filter(Boolean).join(' · ');
-  else if(p.role==='gym')sub=[info.location,info.sports].filter(Boolean).join(' · ');
-  else if(p.role==='coach')sub=[info.specialty,info.sport].filter(Boolean).join(' · ');
-  else if(p.role==='official')sub=[info.type,info.sport].filter(Boolean).join(' · ');
-  else if(p.role==='sponsor')sub=[info.brand,info.looking].filter(Boolean).join(' · ');
+  if(verified){
+    if(p.role==='fighter')sub=[info.sport,info.weight?info.weight+' lbs':'',info.gym&&info.gym!=='Independent / not listed yet'?info.gym:''].filter(Boolean).join(' · ');
+    else if(p.role==='gym')sub=[info.location,info.sports].filter(Boolean).join(' · ');
+    else if(p.role==='coach')sub=[info.specialty,info.sport].filter(Boolean).join(' · ');
+    else if(p.role==='official')sub=[info.type,info.sport].filter(Boolean).join(' · ');
+    else if(p.role==='sponsor')sub=[info.brand,info.looking].filter(Boolean).join(' · ');
+  }
   const roleColor={fighter:'var(--red)',gym:'var(--gold)',coach:'var(--purple)',official:'var(--green)',sponsor:'var(--blue)'}[p.role]||'var(--light)';
+  const roleBadge=verified?`<span style="font-size:9px;color:${roleColor};font-weight:600;text-transform:uppercase;letter-spacing:.5px">${ROLE_LABELS[p.role]||p.role}</span>`:'';
   return `
     <div onclick="openDirProfile('${p.id}')" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--dark2);border:1px solid var(--dark4);border-radius:var(--r);cursor:pointer">
       ${avatarHtml(p,name,44)}
       <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${name}</span><span style="font-size:9px;color:${roleColor};font-weight:600;text-transform:uppercase;letter-spacing:.5px">${ROLE_LABELS[p.role]||p.role}</span></div>
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;font-weight:600;color:var(--white)">${name}</span>${roleBadge}</div>
         <div style="font-size:11px;color:var(--mid);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub||'Self-listed'}</div>
       </div>
       <span style="color:var(--mid);font-size:16px">›</span>
@@ -4819,13 +4870,29 @@ function renderCreatorProfile(){
           ];
           return roles.map(u=>{
             const active=myRole===u.id;
+            // Verification gate (2026-10-01): show the real status of the
+            // user's own latest request for THIS role, if their current role
+            // matches it. state.myRoleVerification is loaded directly from
+            // role_verification_requests (RLS: a user always sees their own
+            // rows), so this reflects real approval state, not a guess.
+            let verifBadge=active?'<span style="font-size:9px;color:'+u.color+';font-weight:600">● Self-listed</span>':'';
+            if(active){
+              const mv=state.myRoleVerification;
+              if(mv&&mv.requested_role===u.id){
+                if(mv.status==='approved')verifBadge='<span style="font-size:9px;color:var(--green);font-weight:600">✓ Verified</span>';
+                else if(mv.status==='rejected')verifBadge='<span style="font-size:9px;color:var(--red);font-weight:600">✗ Not approved</span>';
+                else verifBadge='<span style="font-size:9px;color:var(--gold);font-weight:600">⏳ Pending verification</span>';
+              }else{
+                verifBadge='<span style="font-size:9px;color:var(--gold);font-weight:600">⏳ Pending verification</span>';
+              }
+            }
             return `
             <div style="background:${u.bg};border:1px solid ${active?u.color:u.border};border-radius:var(--r);padding:11px 14px">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
                 <div style="display:flex;align-items:center;gap:8px">
                   <span style="font-size:15px">${u.icon}</span>
                   <span style="font-size:13px;font-weight:600;color:${active?u.color:'var(--white)'}">${u.label}</span>
-                  ${active?`<span style="font-size:9px;color:${u.color};font-weight:600">● Self-listed</span>`:''}
+                  ${verifBadge}
                 </div>
                 <button onclick="openRoleForm('${u.id}')" style="background:${active?'transparent':u.color};color:${active?u.color:'#fff'};border:${active?'1px solid '+u.color:'none'};padding:5px 12px;border-radius:10px;font-size:10px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">${active?'Edit':'List as '+u.label.split(' ')[0]}</button>
               </div>
@@ -5091,31 +5158,51 @@ function renderProfileDetail(){
   const reels=state.viewProfileReels||[];
   const fc=state.viewProfileFollowers||0;
   const iFollow=state.viewProfileIFollow||false;
+  // Verification gate (2026-10-01): someone else only sees this profile's
+  // role (badge + detail rows) once profiles_public.role_verified is true.
+  // The profile's own owner always sees it, with an honest status indicator
+  // (pending/verified/not approved) instead of the generic "self-listed" tag
+  // — same data loaded for the "My Role" section on the profile tab.
+  const roleVisible=isMe||!!p.role_verified;
+  let roleStatusBadge='<span style="font-size:9px;color:var(--mid)">● self-listed</span>';
+  if(isMe){
+    const mv=state.myRoleVerification;
+    if(mv&&mv.requested_role===p.role){
+      if(mv.status==='approved')roleStatusBadge='<span style="font-size:9px;color:var(--green);font-weight:600">✓ Verified</span>';
+      else if(mv.status==='rejected')roleStatusBadge='<span style="font-size:9px;color:var(--red);font-weight:600">✗ Not approved</span>';
+      else roleStatusBadge='<span style="font-size:9px;color:var(--gold);font-weight:600">⏳ Pending verification</span>';
+    }else{
+      roleStatusBadge='<span style="font-size:9px;color:var(--gold);font-weight:600">⏳ Pending verification</span>';
+    }
+  }
 
-  // Role detail rows
+  // Role detail rows — only computed (and shown) when the role is actually
+  // visible per the gate above.
   let detailRows='';
   const show=(label,val)=>val?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--dark3)"><span style="font-size:12px;color:var(--mid)">${label}</span><span style="font-size:13px;color:var(--white);font-weight:500">${escapeHtml(String(val))}</span></div>`:'';
-  if(p.role==='fighter'){
-    detailRows=show('Combat sport',info.sport)+show('Height',info.height)+show('Weight',info.weight?info.weight+' lbs':'')+show('Gym',info.gym)+show('Record',info.record)+show('Stance',info.stance);
-  }else if(p.role==='gym'){
-    detailRows=show('Gym name',info.name)+show('Location',info.location)+show('Team',info.team)+show('Sports',info.sports);
-  }else if(p.role==='coach'){
-    detailRows=show('Specialty',info.specialty)+show('Combat sport',info.sport)+show('Gym',info.gym);
-  }else if(p.role==='official'){
-    detailRows=show('Type',info.type)+show('Combat sport',info.sport)+show('Experience',info.years?info.years+' yrs':'');
-  }else if(p.role==='sponsor'){
-    detailRows=show('Brand',info.brand)+show('Sponsors',info.looking)+show('Website',info.website);
+  if(roleVisible){
+    if(p.role==='fighter'){
+      detailRows=show('Combat sport',info.sport)+show('Height',info.height)+show('Weight',info.weight?info.weight+' lbs':'')+show('Gym',info.gym)+show('Record',info.record)+show('Stance',info.stance);
+    }else if(p.role==='gym'){
+      detailRows=show('Gym name',info.name)+show('Location',info.location)+show('Team',info.team)+show('Sports',info.sports);
+    }else if(p.role==='coach'){
+      detailRows=show('Specialty',info.specialty)+show('Combat sport',info.sport)+show('Gym',info.gym);
+    }else if(p.role==='official'){
+      detailRows=show('Type',info.type)+show('Combat sport',info.sport)+show('Experience',info.years?info.years+' yrs':'');
+    }else if(p.role==='sponsor'){
+      detailRows=show('Brand',info.brand)+show('Sponsors',info.looking)+show('Website',info.website);
+    }
   }
 
   return `
-    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">${isMe?'My Profile':roleLabel||'Profile'}</div><div style="width:38px"></div></div>
+    <div class="nav-bar"><button class="back-btn" onclick="goBack()" aria-label="Back">‹</button><div class="nav-title">${isMe?'My Profile':(roleVisible?roleLabel:null)||'Profile'}</div><div style="width:38px"></div></div>
     <div class="inner-scroll">
       <div style="padding:24px 18px 16px;text-align:center;background:linear-gradient(180deg,var(--dark2),transparent)">
         <div style="display:flex;justify-content:center;margin-bottom:12px">${avatarHtml(p,name,84)}</div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:1px;color:var(--white);line-height:1">${name}</div>
         ${p.username?`<div style="font-size:12px;color:var(--mid);margin-top:2px">@${p.username}</div>`:''}
-        ${roleLabel?`<div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:var(--dark3);padding:4px 12px;border-radius:12px"><span style="font-size:11px;font-weight:600;color:${roleColor};text-transform:uppercase;letter-spacing:.5px">${roleLabel}</span><span style="font-size:9px;color:var(--mid)">● self-listed</span></div>`:''}
-        ${p.role==='fighter'&&info.gym?`<div style="font-size:12px;color:var(--lighter);margin-top:8px">🥊 ${escapeHtml(info.gym)}</div>`:''}
+        ${roleLabel&&roleVisible?`<div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:var(--dark3);padding:4px 12px;border-radius:12px"><span style="font-size:11px;font-weight:600;color:${roleColor};text-transform:uppercase;letter-spacing:.5px">${roleLabel}</span>${roleStatusBadge}</div>`:''}
+        ${p.role==='fighter'&&info.gym&&roleVisible?`<div style="font-size:12px;color:var(--lighter);margin-top:8px">🥊 ${escapeHtml(info.gym)}</div>`:''}
 
         <div style="display:flex;justify-content:center;gap:28px;margin-top:16px">
           <div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--white)">${reels.length}</div><div style="font-size:10px;color:var(--mid);text-transform:uppercase;letter-spacing:.5px">Reels</div></div>
@@ -5196,9 +5283,17 @@ async function loadViewProfile(id){
   const db=window.ruDB; if(!db||!id)return;
   state.viewProfileLoading=true;
   try{
-    const pr=await db.from('profiles_public').select('id,username,display_name,avatar_url,role,role_info').eq('id',id).limit(1);
+    const pr=await db.from('profiles_public').select('id,username,display_name,avatar_url,role,role_info,role_verified').eq('id',id).limit(1);
     state.viewProfile=(pr.data&&pr.data[0])||null;
     state.viewProfileId=id;
+    // Verification gate (2026-10-01): when viewing your own profile, also
+    // refresh your own latest role_verification_requests row so the page can
+    // show an honest pending/verified/not-approved status instead of just
+    // the generic "self-listed" tag. loadMyRoleVerification() itself only
+    // ever reads the caller's own rows (RLS), so it's safe to call here too.
+    if(id===(window.ruUserId||null) && typeof loadMyRoleVerification==='function'){
+      loadMyRoleVerification();
+    }
     // Their reels
     const rr=await db.from('reels').select('id,caption,media_url,media_type,created_at').eq('author_id',id).order('created_at',{ascending:false}).limit(60);
     state.viewProfileReels=rr.data||[];
@@ -7238,10 +7333,85 @@ function checkSafeSportStatus(userId){
   return {status:'valid',daysUntilExpiry};
 }
 
-/* ===== ADMIN VERIFICATION DASHBOARD ===== */
+/* ===== ADMIN VERIFICATION DASHBOARD (rewired 2026-10-01) =====
+   Formerly 100% cosmetic — read/wrote a localStorage blob
+   (state.verificationStatus) keyed to legacy demo personas, touching no real
+   table (see LEARNINGS.md). Now backed by the real venues.status/gyms.status/
+   role_verification_requests tables from supabase/migrations/
+   20261001000000_add_listing_verification_gate.sql. Reachable only via the
+   Admin Panel, which is itself gated behind `admin-unlocked` — granted
+   automatically for a real profiles.is_admin account, or via the private
+   passphrase — never for a moderator (per Kaden's decision 3: this gate is
+   admin-only, same restriction as venue-space verification / gym
+   certification / team-role management, PR #37). The real enforcement is
+   server-side regardless: every table/function this screen touches checks
+   profiles.is_admin, not is_moderator.
+   The old state.verificationStatus / isVerified() / getVerifStatus() /
+   requireVerified() / openVerifyForm() system is UNTOUCHED below — that's a
+   separate, unrelated legacy fighter-credential gate (claim_fight,
+   claim_official, publish, create_fighter_card) still driven by demo data,
+   out of scope for this task. */
+async function loadAdminVerifyQueue(){
+  const db=window.ruDB; if(!db)return;
+  state.adminVerifyLoading=true;
+  try{
+    const vq=await db.from('venues').select('id,name,city,region,owner_id,created_at').eq('status','pending').order('created_at',{ascending:true});
+    state.adminPendingVenues=vq.data||[];
+    const gq=await db.from('gyms').select('id,name,location,owner_id,created_at').eq('status','pending').order('created_at',{ascending:true});
+    state.adminPendingGyms=gq.data||[];
+    const rq=await db.from('role_verification_requests').select('id,profile_id,requested_role,role_info,created_at').eq('status','pending').order('created_at',{ascending:true});
+    const roleRows=rq.data||[];
+    const ids=[...new Set(roleRows.map(r=>r.profile_id))];
+    let pmap={};
+    if(ids.length){
+      const pp=await db.from('profiles_public').select('id,display_name,username').in('id',ids);
+      (pp.data||[]).forEach(p=>{pmap[p.id]=p;});
+    }
+    state.adminPendingRoleRequests=roleRows.map(r=>({...r,profile:pmap[r.profile_id]||null}));
+  }catch(e){console.log('loadAdminVerifyQueue error:',e&&e.message);}
+  state.adminVerifyLoading=false;
+  if(state.currentScreen==='admin_verify')render();
+}
+
+async function adminSetVenueStatus(id,newStatus){
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {error}=await db.rpc('admin_set_venue_status',{target_id:id,new_status:newStatus});
+    if(error)throw error;
+    await loadAdminVerifyQueue();
+  }catch(e){console.log('adminSetVenueStatus error:',e&&e.message);alert(e&&e.message?e.message:'Could not update venue status. If this is the first time anyone has done this, the migration may not be live yet — check with Kaden.');}
+}
+
+async function adminSetGymStatus(id,newStatus){
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {error}=await db.rpc('admin_set_gym_status',{target_id:id,new_status:newStatus});
+    if(error)throw error;
+    await loadAdminVerifyQueue();
+  }catch(e){console.log('adminSetGymStatus error:',e&&e.message);alert(e&&e.message?e.message:'Could not update gym status. If this is the first time anyone has done this, the migration may not be live yet — check with Kaden.');}
+}
+
+async function adminSetRoleRequestStatus(id,newStatus){
+  let note=null;
+  if(newStatus==='rejected'){
+    note=prompt('Reason for rejection (optional, stored on the request):','');
+    if(note===null)return; // cancelled
+  }
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {error}=await db.rpc('admin_set_role_request_status',{request_id:id,new_status:newStatus,note:note});
+    if(error)throw error;
+    await loadAdminVerifyQueue();
+  }catch(e){console.log('adminSetRoleRequestStatus error:',e&&e.message);alert(e&&e.message?e.message:'Could not update role request. If this is the first time anyone has done this, the migration may not be live yet — check with Kaden.');}
+}
+
 function renderAdminVerifyDashboard(){
-  if(!state.verificationStatus)return '';
-  const pending=(state.verificationStatus._pendingQueue||[]).filter(id=>state.verificationStatus[id]==='pending');
+  if(!window._adminVerifyLoaded){window._adminVerifyLoaded=true;setTimeout(loadAdminVerifyQueue,0);}
+  const venues=state.adminPendingVenues||[];
+  const gyms=state.adminPendingGyms||[];
+  const roleReqs=state.adminPendingRoleRequests||[];
+  const approveBtn=(onclick)=>`<button style="flex:1;background:rgba(29,184,122,.1);border:1px solid rgba(29,184,122,.3);color:var(--green);font-size:12px;font-weight:600;padding:9px;border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif" onclick="${onclick}">✓ Approve</button>`;
+  const rejectBtn=(onclick)=>`<button style="flex:1;background:rgba(232,37,26,.08);border:1px solid rgba(232,37,26,.2);color:var(--red);font-size:12px;font-weight:600;padding:9px;border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif" onclick="${onclick}">✕ Reject</button>`;
   return `
     <div class="nav-bar">
       <button class="back-btn" onclick="closeAdminVerify()">‹</button>
@@ -7250,105 +7420,58 @@ function renderAdminVerifyDashboard(){
     </div>
     <div class="inner-scroll">
       <div style="padding:14px 18px 0">
-        <div style="font-size:10px;color:var(--gold);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">Admin only · Credential review</div>
-        <div style="font-size:12px;color:var(--light);margin-bottom:14px;line-height:1.5">Review submitted credentials before activating accounts. Cross-reference with OSAC at boxing@health.ok.gov or (405) 271-5217. Check ABC suspension list at FightFax (856) 396-0533 for all fighters.</div>
+        <div style="font-size:10px;color:var(--gold);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">Admin only · Listing review</div>
+        <div style="font-size:12px;color:var(--light);margin-bottom:14px;line-height:1.5">New venues, gyms, and self-listed roles (Fighter/Coach/Official/Sponsor) are invisible to the public until approved here. Approving a venue or gym listing only confirms the listing itself should be public — it's a separate decision from certifying a gym (verified_venue) or verifying a specific space for a specific sport (verified_sports), both handled elsewhere.</div>
       </div>
 
-      <div style="padding:0 18px;background:rgba(232,37,26,.06);border-top:1px solid rgba(232,37,26,.15);border-bottom:1px solid rgba(232,37,26,.15);padding:12px 18px;margin-bottom:14px">
-        <div style="font-size:12px;font-weight:600;color:var(--white);margin-bottom:6px">Before approving any fighter:</div>
-        <div style="font-size:11px;color:var(--lighter);line-height:1.7">
-          ☐ Determine fighter type: Amateur boxer? USA Boxing passbook required. Pro/MMA/kickboxing? OSAC Federal ID required.<br>
-          ☐ For amateur boxers: verify USA Boxing membership at usaboxing.org/find-a-member<br>
-          ☐ For pro boxers: Call FightFax (856) 396-0533 to verify they are not on national suspension<br>
-          ☐ Confirm SafeSport certification is current (annual requirement for all coaches/officials)<br>
-          ☐ Verify medical bloodwork (HIV/HepB/HepC) within 365 days for OSAC events<br>
-          ☐ Check fight record for mandatory suspension windows (TKO=30 days, KO=45 days)
-        </div>
-      </div>
+      ${state.adminVerifyLoading&&!venues.length&&!gyms.length&&!roleReqs.length?`<div class="empty" style="padding:30px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading queue…</div></div>`:''}
 
-      <div class="sec-head"><div class="sec-title" style="color:var(--gold)">Pending · ${pending.length}</div></div>
-      ${pending.length===0?`<div class="empty"><div class="empty-text">No accounts pending verification</div></div>`:''}
+      <div class="sec-head"><div class="sec-title" style="color:var(--gold)">Pending Venues · ${venues.length}</div></div>
       <div style="padding:0 18px">
-        ${pending.map(id=>{
-          const u=state.users[id];
-          if(!u)return '';
-          return `
-            <div style="background:var(--dark2);border:1px solid rgba(245,166,35,.3);border-radius:var(--r);padding:14px;margin-bottom:10px">
-              <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-                <div style="width:44px;height:44px;border-radius:50%;background:${avatarBg(u.color)};color:${avatarColor(u.color)};display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:16px">${u.avatar}</div>
-                <div style="flex:1">
-                  <div style="font-size:14px;font-weight:600;color:var(--white)">${u.name}</div>
-                  <div style="font-size:11px;color:var(--mid)">${u.subRole||u.role} · ${u.location||''}</div>
-                </div>
-                <div style="background:rgba(245,166,35,.12);color:var(--gold);font-size:10px;padding:3px 9px;border-radius:10px;font-weight:500">Pending</div>
-              </div>
-              ${u.license?`<div style="font-size:11px;color:var(--mid);margin-bottom:10px;font-family:'DM Mono',monospace">License claimed: ${u.license?.number||u.license||'—'}</div>`:''}
-              <div style="display:flex;gap:8px">
-                <button style="flex:1;background:rgba(29,184,122,.1);border:1px solid rgba(29,184,122,.3);color:var(--green);font-size:12px;font-weight:600;padding:9px;border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif" onclick="adminApprove('${id}')">✓ Approve</button>
-                <button style="flex:1;background:rgba(232,37,26,.08);border:1px solid rgba(232,37,26,.2);color:var(--red);font-size:12px;font-weight:600;padding:9px;border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif" onclick="adminReject('${id}')">✕ Reject</button>
-              </div>
+        ${venues.length===0?`<div class="empty"><div class="empty-text">No venues pending review</div></div>`:venues.map(v=>`
+          <div style="background:var(--dark2);border:1px solid rgba(245,166,35,.3);border-radius:var(--r);padding:14px;margin-bottom:10px">
+            <div style="font-size:14px;font-weight:600;color:var(--white)">${escapeHtml(v.name||'Untitled venue')}</div>
+            <div style="font-size:11px;color:var(--mid);margin-bottom:10px">${escapeHtml([v.city,v.region].filter(Boolean).join(', ')||'No location given')}</div>
+            <div style="display:flex;gap:8px">
+              ${approveBtn(`adminSetVenueStatus('${v.id}','approved')`)}
+              ${rejectBtn(`adminSetVenueStatus('${v.id}','rejected')`)}
             </div>
-          `;
-        }).join('')}
+          </div>`).join('')}
       </div>
 
-      <div class="sec-head"><div class="sec-title">All Accounts</div><div style="font-size:10px;color:var(--mid)">Tap status badge to cycle for testing</div></div>
+      <div class="sec-head"><div class="sec-title" style="color:var(--gold)">Pending Gyms · ${gyms.length}</div></div>
       <div style="padding:0 18px">
-        ${Object.values(state.users).map(u=>{
-          const status=getVerifStatus(u.id);
-          const nextStatus=status==='verified'?'pending':status==='pending'?'rejected':'verified';
-          return `
-            <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--dark3)">
-              <div style="width:36px;height:36px;border-radius:50%;background:${avatarBg(u.color)};color:${avatarColor(u.color)};display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:13px;flex-shrink:0">${u.avatar}</div>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:13px;font-weight:500;color:var(--white)">${u.name}</div>
-                <div style="font-size:10px;color:var(--mid)">${u.subRole||u.role}</div>
-              </div>
-              <div onclick="cycleVerifStatus('${u.id}')" style="cursor:pointer;font-size:10px;padding:2px 8px;border-radius:8px;font-weight:500;background:${status==='verified'?'rgba(29,184,122,.1)':status==='pending'?'rgba(245,166,35,.1)':'rgba(232,37,26,.1)'};color:${status==='verified'?'var(--green)':status==='pending'?'var(--gold)':'var(--red)'}" title="Tap to set to ${nextStatus}">${status} ↻</div>
+        ${gyms.length===0?`<div class="empty"><div class="empty-text">No gyms pending review</div></div>`:gyms.map(g=>`
+          <div style="background:var(--dark2);border:1px solid rgba(245,166,35,.3);border-radius:var(--r);padding:14px;margin-bottom:10px">
+            <div style="font-size:14px;font-weight:600;color:var(--white)">${escapeHtml(g.name||'Untitled gym')}</div>
+            <div style="font-size:11px;color:var(--mid);margin-bottom:10px">${escapeHtml(g.location||'No location given')}</div>
+            <div style="display:flex;gap:8px">
+              ${approveBtn(`adminSetGymStatus('${g.id}','approved')`)}
+              ${rejectBtn(`adminSetGymStatus('${g.id}','rejected')`)}
             </div>
-          `;
+          </div>`).join('')}
+      </div>
+
+      <div class="sec-head"><div class="sec-title" style="color:var(--gold)">Pending Roles · ${roleReqs.length}</div></div>
+      <div style="padding:0 18px">
+        ${roleReqs.length===0?`<div class="empty"><div class="empty-text">No role requests pending review</div></div>`:roleReqs.map(r=>{
+          const nm=escapeHtml((r.profile&&(r.profile.display_name||r.profile.username))||'User');
+          const info=r.role_info||{};
+          const detail=[info.sport,info.specialty,info.type,info.brand].filter(Boolean).join(' · ');
+          return `
+          <div style="background:var(--dark2);border:1px solid rgba(245,166,35,.3);border-radius:var(--r);padding:14px;margin-bottom:10px">
+            <div style="font-size:14px;font-weight:600;color:var(--white)">${nm}</div>
+            <div style="font-size:11px;color:var(--mid);margin-bottom:10px">Requesting: ${escapeHtml(ROLE_LABELS[r.requested_role]||r.requested_role)}${detail?' · '+escapeHtml(detail):''}</div>
+            <div style="display:flex;gap:8px">
+              ${approveBtn(`adminSetRoleRequestStatus('${r.id}','approved')`)}
+              ${rejectBtn(`adminSetRoleRequestStatus('${r.id}','rejected')`)}
+            </div>
+          </div>`;
         }).join('')}
       </div>
       <div class="pb-safe"></div>
     </div>
   `;
-}
-
-function adminApprove(uid){
-  state.verificationStatus[uid]='verified';
-  state.verificationStatus._pendingQueue=(state.verificationStatus._pendingQueue||[]).filter(x=>x!==uid);
-  // Add approval message to their inbox
-  const conv={id:'c_verify_'+uid,participant:uid,unread:1,lastTime:'Now',messages:[
-    {from:'system',text:'Your account has been verified by the RoundUp admin team. You now have full access to fight features, bout agreements, and events.'}
-  ]};
-  state.conversations.push(conv);
-  saveState();render();
-  alert(state.users[uid]?.name+' approved. They have been notified via in-app message.');
-}
-
-function adminReject(uid){
-  const reason=prompt('Reason for rejection (will be sent to applicant):','');
-  if(reason===null)return;
-  state.verificationStatus[uid]='rejected';
-  state.verificationStatus._pendingQueue=(state.verificationStatus._pendingQueue||[]).filter(x=>x!==uid);
-  const conv={id:'c_reject_'+uid,participant:uid,unread:1,lastTime:'Now',messages:[
-    {from:'system',text:'Your account verification was not approved. Reason: '+(reason||'Documentation did not meet requirements')+'. For amateur boxing credentials, contact Oklahoma LBC #27: aaron.sloan@engineroomboxing.com. For OSAC (pro boxing/MMA/kickboxing) credentials, contact boxing@health.ok.gov or (405) 271-5217.'}
-  ]};
-  state.conversations.push(conv);
-  saveState();render();
-}
-
-function cycleVerifStatus(uid){
-  const current=getVerifStatus(uid);
-  const next=current==='verified'?'pending':current==='pending'?'rejected':'verified';
-  state.verificationStatus[uid]=next;
-  if(next==='pending'){
-    if(!state.verificationStatus._pendingQueue)state.verificationStatus._pendingQueue=[];
-    if(!state.verificationStatus._pendingQueue.includes(uid))state.verificationStatus._pendingQueue.push(uid);
-  } else {
-    state.verificationStatus._pendingQueue=(state.verificationStatus._pendingQueue||[]).filter(x=>x!==uid);
-  }
-  saveState();render();
 }
 function closeAdminVerify(){state.currentScreen='main';render();}
 
@@ -10319,6 +10442,7 @@ render();
       }).catch(function(e){console.log('profile load skipped:',e&&e.message);});
       if(typeof loadMyGyms==='function')setTimeout(loadMyGyms,100);
       if(typeof loadMyVenues==='function')setTimeout(loadMyVenues,100);
+      if(typeof loadMyRoleVerification==='function')setTimeout(loadMyRoleVerification,100);
       if(typeof loadMyNotifications==='function')setTimeout(loadMyNotifications,300);
       if(typeof loadMyBlocks==='function')setTimeout(loadMyBlocks,100);
       // Push the real name into local state so the UI shows it everywhere.
