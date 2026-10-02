@@ -32,6 +32,35 @@
 --     exposure fix in this project.
 -- ============================================================================
 --
+-- FOLLOW-UP — 2026-10-02 (PR review on #45 flagged 3 functional gaps + 1
+-- undecided design question; this file was edited in place, not re-created,
+-- since it was never applied — see the follow-up PR description for the full
+-- review). Changes made in this pass, each tagged inline where it lands:
+--   Fix 1 (Issue A): existing role holders had no row and no path back to
+--     visibility. Added admin_approve_unsubmitted_role() (section 3) so an
+--     admin can approve a profile/role pair directly even with zero prior
+--     role_verification_requests rows — index.html's dashboard now also
+--     queries for this "never submitted" case.
+--   Fix 2 (Issue B): saveRole() inserted a brand-new pending row on every
+--     save, flooding the queue with duplicates. Added `updated_at` column
+--     plus a scoped UPDATE policy/grant (section 3, right before
+--     role_verification_requests_insert_own's grant) so the client can
+--     update an existing pending row's role_info in place instead of
+--     inserting a new one. See that policy's comment for the one narrow
+--     write-path this opens and why it's still safe.
+--   Fix 3 (Issue C): nothing here changed — the three admin_set_*_status()
+--     functions already accepted any status value with no "this must
+--     currently be pending" guard, so index.html's new Approved/Rejected
+--     tabs (letting an admin undo a mis-tap) needed no backend change.
+--     Documented here only so a future reader isn't left searching for it.
+--   Fix 4 (Issue D) — Kaden's decision, confirmed 2026-10-01/02, not a
+--     guess: role_verified changes from "is the MOST RECENT matching
+--     request approved" to "does ANY approved request exist for this
+--     (profile_id, requested_role) pair" — an old approved listing now
+--     keeps showing publicly while a newer resubmission for the SAME role
+--     sits pending, rather than blanking out immediately. See section 4.
+-- ============================================================================
+--
 -- Purpose: VERIFICATION-GATE-DESIGN.md, approved 2026-10-01. Kaden's three
 -- binding decisions this migration encodes:
 --   1. Hard gate — a new venue, gym, or self-listed role (Fighter/Coach/
@@ -328,7 +357,13 @@ create table if not exists public.role_verification_requests (
   reviewed_by uuid references public.profiles(id),
   reviewed_at timestamptz,
   note text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Fix 2 (2026-10-02): separate "first submitted" from "last edited" so the
+  -- admin queue can show a real freshness signal when an existing pending
+  -- row gets updated in place instead of duplicated (see the UPDATE policy
+  -- below). Defaults to created_at's value on insert; bumped explicitly by
+  -- the client on every in-place edit.
+  updated_at timestamptz not null default now()
 );
 
 create index if not exists role_verification_requests_profile_role_idx
@@ -360,17 +395,38 @@ create policy "role_verification_requests_insert_own"
   );
 
 -- Column-level lockdown: status/reviewed_by/reviewed_at/note may ONLY ever
--- change via admin_set_role_request_status() below (SECURITY DEFINER,
--- bypasses RLS and table grants). No UPDATE policy exists at all above, so
--- RLS already default-denies every UPDATE regardless of table grants — this
--- REVOKE is defense-in-depth documentation of intent, same pattern already
--- used for rental_agreements/venue_bookings (20260911000000 section 3 note).
--- A user who wants to change their submission (e.g. edited role_info, or a
--- changed role) submits a NEW row via INSERT rather than editing an existing
--- one — the profiles_public view below always reads the MOST RECENT matching
--- request, so a fresh submission correctly resets visibility to pending
--- without needing an UPDATE path at all.
+-- change via admin_set_role_request_status() or
+-- admin_approve_unsubmitted_role() below (both SECURITY DEFINER, bypass RLS
+-- and table grants). The REVOKE below still fully blocks a user from ever
+-- touching those four columns.
+--
+-- Fix 2 (2026-10-02) changes what follows this line from the original
+-- design: the original plan was "no UPDATE policy at all — a user who wants
+-- to change their submission inserts a NEW row every time," relying on
+-- profiles_public always reading the MOST RECENT matching request. In
+-- practice that let three trivial edits produce three pending rows in the
+-- admin queue with no way to tell them apart (PR #45 review, Issue B). Fix:
+-- a narrow UPDATE policy that lets a user update ONLY (role_info,
+-- updated_at) on ONLY their own ALREADY-PENDING row for ONE (profile_id,
+-- requested_role) pair — status/reviewed_by/reviewed_at/note are excluded
+-- from both the policy's WITH CHECK and the column grant below, so this
+-- cannot be used to self-approve or tamper with review fields. index.html's
+-- saveRole() checks for an existing pending row first and UPDATEs it instead
+-- of inserting a new one when found; see that function for the small,
+-- accepted race-window note (two near-simultaneous saves from the same user
+-- could each insert, in the rare case both reads land before either write
+-- commits — low-risk for a single-user profile-edit flow, not worth a
+-- partial unique index for this fix).
 revoke update on public.role_verification_requests from authenticated, anon;
+
+drop policy if exists "role_verification_requests_update_own_pending" on public.role_verification_requests;
+create policy "role_verification_requests_update_own_pending"
+  on public.role_verification_requests for update
+  using (profile_id = auth.uid() and status = 'pending')
+  with check (profile_id = auth.uid() and status = 'pending' and reviewed_by is null and reviewed_at is null);
+
+grant update (role_info, updated_at)
+  on public.role_verification_requests to authenticated;
 
 revoke insert on public.role_verification_requests from authenticated, anon;
 grant insert (profile_id, requested_role, role_info, status)
@@ -412,6 +468,66 @@ begin
 end;
 $$;
 
+-- Fix 1 (2026-10-02, Issue A): decision #2 drops every PRE-EXISTING
+-- self-listed role to unverified with no role_verification_requests row ever
+-- created for it (see the header note on decision #2 above) — there was no
+-- queue entry for an admin to act on and no path back to a verified badge
+-- for that user at all. This function is that path: it lets an admin approve
+-- a (profile_id, requested_role) pair directly, synthesizing the first-ever
+-- request row for it as already-approved, for the specific case where ZERO
+-- role_verification_requests rows exist yet for that pair. index.html's
+-- admin dashboard surfaces these as "Never submitted for review" (distinct
+-- from a genuine pending row) and calls this function on approve/reject.
+-- Deliberately also accepts 'rejected' (not approve-only) for symmetry with
+-- admin_set_venue_status/admin_set_gym_status, which both accept either —
+-- an admin may reasonably want to explicitly reject a never-submitted role
+-- rather than leave it in limbo.
+create or replace function public.admin_approve_unsubmitted_role(target_profile_id uuid, target_role text, new_status text, note text default null)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_role_info jsonb;
+begin
+  if not exists (
+    select 1 from public.profiles where id = auth.uid() and is_admin = true
+  ) then
+    raise exception 'Only an admin can approve or reject a role.';
+  end if;
+
+  if target_role not in ('fighter','coach','official','sponsor') then
+    raise exception 'Invalid role: %. Must be fighter, coach, official, or sponsor.', target_role;
+  end if;
+
+  if new_status not in ('approved','rejected') then
+    raise exception 'Invalid role verification status: %. Must be approved or rejected.', new_status;
+  end if;
+
+  -- Guard against a race (e.g. the user submits their own request, or
+  -- another admin tab already acted, between this screen loading and this
+  -- call) — if a row already exists for this exact pair, this is no longer
+  -- the "never submitted" case and admin_set_role_request_status should be
+  -- used on that real row instead, so the audit trail stays on one row.
+  if exists (
+    select 1 from public.role_verification_requests
+    where profile_id = target_profile_id and requested_role = target_role
+  ) then
+    raise exception 'A verification request already exists for this profile and role — refresh the queue and use the normal approve/reject action on it instead.';
+  end if;
+
+  select role_info into v_role_info
+  from public.profiles
+  where id = target_profile_id and role = target_role;
+
+  insert into public.role_verification_requests
+    (profile_id, requested_role, role_info, status, reviewed_by, reviewed_at, note)
+  values
+    (target_profile_id, target_role, coalesce(v_role_info, '{}'::jsonb), new_status, auth.uid(), now(), note);
+end;
+$$;
+
 -- ----------------------------------------------------------------------------
 -- 4) profiles_public — add a computed role_verified column.
 --    Must come AFTER role_verification_requests exists (section 3 above):
@@ -423,11 +539,21 @@ $$;
 --
 --    Preserves every column the existing view already has (id, display_name,
 --    username, avatar_url, role, role_info — see 20260906010000) and adds
---    exactly one new one. role_verified is true only if the MOST RECENT
---    role_verification_requests row for this profile, matching the
---    profile's CURRENT role, has status = 'approved' — so changing roles or
---    re-submitting correctly resets visibility to unverified until the new
---    request clears, per the design doc.
+--    exactly one new one.
+--
+--    Fix 4 (2026-10-02, Issue D) — Kaden's decision, confirmed directly and
+--    final, not a guess: role_verified is true whenever ANY
+--    role_verification_requests row exists for (profile_id, requested_role =
+--    profiles.role) with status = 'approved' — regardless of whether a
+--    newer PENDING request also exists for that same role. This replaces the
+--    original "is the MOST RECENT matching request approved" computation,
+--    which blanked a user's public badge the instant they resubmitted an
+--    edit, even before an admin had looked at it. Concretely: an old
+--    approved listing keeps showing publicly while a resubmitted edit for
+--    the SAME role sits pending — only a REJECTED outcome on that review (or
+--    switching to a genuinely different role, which naturally has no
+--    approved row yet) changes visibility. Do not revert this to a
+--    "latest row wins" computation without re-confirming with Kaden first.
 --
 --    ⚠️ MUST ALSO PRESERVE `where is_active` — this view's definition was
 --    already updated once since 20260906010000, by 20260925020000 (account
@@ -465,13 +591,14 @@ select
   p.avatar_url,
   p.role,
   p.role_info,
-  coalesce((
-    select rvr.status = 'approved'
+  -- Fix 4 (2026-10-02, Issue D, confirmed with Kaden, final — see the note
+  -- above): true if ANY approved request exists for this role, not just the
+  -- most recent request.
+  exists (
+    select 1
     from public.role_verification_requests rvr
-    where rvr.profile_id = p.id and rvr.requested_role = p.role
-    order by rvr.created_at desc
-    limit 1
-  ), false) as role_verified
+    where rvr.profile_id = p.id and rvr.requested_role = p.role and rvr.status = 'approved'
+  ) as role_verified
 from public.profiles p
 where p.is_active;
 
@@ -493,5 +620,9 @@ notify pgrst, 'reload schema';
 --    VERIFICATION-GATE-DESIGN.md §3.3 / decision 9. That enforcement point
 --    doesn't exist in real, non-demo code yet.
 -- 4. No retroactive role_verification_requests rows synthesized for existing
---    self-listed roles — see the header note on decision #2 above.
+--    self-listed roles BY THIS MIGRATION FILE — still true, this file
+--    creates zero rows on apply. The 2026-10-02 follow-up (Fix 1 above) adds
+--    admin_approve_unsubmitted_role() as the explicit, admin-triggered path
+--    for creating that first row per profile/role — one deliberate action
+--    per case, not a blanket automatic backfill run by this migration.
 -- ----------------------------------------------------------------------------
