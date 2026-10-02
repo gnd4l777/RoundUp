@@ -1259,13 +1259,15 @@ async function saveRole(roleId){
     // in the public directory (profiles_public.role_verified) until an admin
     // approves this new request — see supabase/migrations/
     // 20261001000000_add_listing_verification_gate.sql. Deliberately
-    // non-fatal: if this insert fails (e.g. the migration isn't applied yet),
+    // non-fatal: if this write fails (e.g. the migration isn't applied yet),
     // the role itself still saved above, same fail-soft approach the rest of
     // this app uses for not-yet-live tables.
+    // Fix 2 (2026-10-02): goes through upsertRoleVerificationRequest() rather
+    // than a bare insert, so three trivial edits don't produce three pending
+    // rows in the admin queue — see that function for why.
     try{
-      const insReq=await db.from('role_verification_requests').insert({profile_id:user.id,requested_role:roleId,role_info:info,status:'pending'});
-      if(insReq.error)console.log('role_verification_requests insert error:',insReq.error.message);
-    }catch(e2){console.log('role_verification_requests insert error:',e2&&e2.message);}
+      await upsertRoleVerificationRequest(db,user.id,roleId,info);
+    }catch(e2){console.log('role_verification_requests upsert error:',e2&&e2.message);}
     if(typeof loadMyRoleVerification==='function')loadMyRoleVerification();
     const rm=document.getElementById('ruRoleForm'); if(rm)rm.style.display='none';
     render();
@@ -1277,20 +1279,114 @@ async function saveRole(roleId){
   }
 }
 
-// Verification gate (2026-10-01): load the signed-in user's own latest
-// role_verification_requests row (RLS lets a user always see their own rows
-// regardless of status) so their profile can show an honest "pending
-// verification" / "verified" / "not approved" indicator for their current
-// role. Fails soft (console.log only) if the table isn't live yet.
+// Verification gate (2026-10-01, extended 2026-10-02 for Fix 1/Fix 2): load
+// EVERY one of the signed-in user's own role_verification_requests rows
+// (RLS lets a user always see their own rows regardless of status), not just
+// the latest one, so myRoleVerificationStatus() below can tell "genuinely no
+// row at all for this role" (Fix 1 — needs a "Submit for verification" CTA)
+// apart from "a row exists but it's pending/rejected" (just a status label).
+// Ordered newest-first; state.myRoleVerification (singular, most recent row
+// overall) is kept for back-compat with any other reader. Fails soft
+// (console.log only) if the table isn't live yet.
 async function loadMyRoleVerification(){
   const db=window.ruDB; if(!db)return;
   const {data:{user}}=await db.auth.getUser();
   if(!user)return;
   try{
-    const {data}=await db.from('role_verification_requests').select('id,requested_role,status,created_at').eq('profile_id',user.id).order('created_at',{ascending:false}).limit(1);
+    const {data}=await db.from('role_verification_requests').select('id,requested_role,status,created_at,updated_at').eq('profile_id',user.id).order('created_at',{ascending:false});
+    state.myRoleVerifications=data||[];
     state.myRoleVerification=(data&&data[0])||null;
     if(state.currentTab==='profile')render();
   }catch(e){console.log('loadMyRoleVerification error:',e&&e.message);}
+}
+
+// Verification gate Fix 1 + Fix 4 (2026-10-02): compute the badge + optional
+// call-to-action for the CALLER's OWN given role, from the full list loaded
+// above. Centralized so the "My Role" section (profile tab) and the owner's
+// view of their own /profile_detail page (loadViewProfile/renderViewProfile)
+// show identical, correct status instead of two copies that can drift.
+//   - No row at all for this role -> "Not submitted" + a "Submit for
+//     verification" CTA (Fix 1: this is the pre-existing self-listed-role
+//     backlog from decision #2 — they never had a row, and a bare "Pending
+//     verification" label falsely implied one already existed).
+//   - Any approved row exists -> "Verified" (Fix 4: mirrors
+//     profiles_public.role_verified's new "ANY approved row" computation —
+//     a newer pending resubmission for the same role does not blank this
+//     out; shown as a small secondary note instead).
+//   - Only a rejected row (no approved ever) -> "Not approved" + a
+//     "Re-submit for verification" CTA, same reasoning as the "no row" case:
+//     a rejection with no path back is the same class of dead end.
+//   - Otherwise (a pending row, no approved/rejected yet) -> "Pending
+//     verification", no CTA (one is already in flight).
+function myRoleVerificationStatus(roleId){
+  const rows=(state.myRoleVerifications||[]).filter(r=>r.requested_role===roleId);
+  if(rows.length===0){
+    return {badge:'<span style="font-size:9px;color:var(--gold);font-weight:600">⚠ Not submitted for review</span>',ctaLabel:'Submit for verification'};
+  }
+  const hasApproved=rows.some(r=>r.status==='approved');
+  const hasPending=rows.some(r=>r.status==='pending');
+  if(hasApproved){
+    let badge='<span style="font-size:9px;color:var(--green);font-weight:600">✓ Verified</span>';
+    if(hasPending)badge+=' <span style="font-size:9px;color:var(--gold)">· update pending review</span>';
+    return {badge,ctaLabel:null};
+  }
+  const latest=rows[0]; // loaded ordered created_at desc
+  if(latest&&latest.status==='rejected'){
+    return {badge:'<span style="font-size:9px;color:var(--red);font-weight:600">✗ Not approved</span>',ctaLabel:'Re-submit for verification'};
+  }
+  return {badge:'<span style="font-size:9px;color:var(--gold);font-weight:600">⏳ Pending verification</span>',ctaLabel:null};
+}
+
+// Verification gate Fix 2 (2026-10-02): insert-or-update so repeated saves
+// of the same (profile_id, requested_role) pair don't pile up as separate
+// pending rows in the admin queue (PR #45 review, Issue B — three trivial
+// edits used to mean three indistinguishable pending rows). If a pending row
+// already exists for this exact pair, update its role_info/updated_at in
+// place; otherwise insert a new one. Relies on the scoped UPDATE policy in
+// supabase/migrations/20261001000000_add_listing_verification_gate.sql,
+// which only lets a user touch (role_info, updated_at) on their own
+// still-pending row — status/reviewed_by/reviewed_at/note stay untouchable
+// from the client either way.
+// Accepted race window: two near-simultaneous saves from the same user
+// (e.g. two open tabs) could each see "no existing pending row" and both
+// insert, producing two pending rows instead of a clean update. Low-risk for
+// a single-user profile-edit flow; a partial unique index would close it
+// fully but isn't needed for this fix (see migration file for the longer
+// version of this note).
+async function upsertRoleVerificationRequest(db,userId,roleId,info){
+  const existing=await db.from('role_verification_requests').select('id').eq('profile_id',userId).eq('requested_role',roleId).eq('status','pending').order('created_at',{ascending:false}).limit(1);
+  if(existing.error)throw existing.error;
+  if(existing.data&&existing.data[0]){
+    const upd=await db.from('role_verification_requests').update({role_info:info,updated_at:new Date().toISOString()}).eq('id',existing.data[0].id);
+    if(upd.error)throw upd.error;
+  }else{
+    const ins=await db.from('role_verification_requests').insert({profile_id:userId,requested_role:roleId,role_info:info,status:'pending'});
+    if(ins.error)throw ins.error;
+  }
+}
+
+// Verification gate Fix 1 (2026-10-02): lets a user whose CURRENT role has
+// genuinely no role_verification_requests row at all — the pre-existing
+// self-listed-role backlog from decision #2, or anyone whose only prior
+// request was rejected — submit (or re-submit) one, using their already-
+// saved role_info. Without this, those accounts had no path back to a
+// verified badge on either side of the app. Goes through the same
+// dedupe-aware upsert as saveRole() so it can never create a second pending
+// row if one already exists by the time this runs.
+async function submitRoleForVerification(roleId){
+  const db=window.ruDB; if(!db){alert('Not connected.');return;}
+  const {data:{user}}=await db.auth.getUser();
+  if(!user){alert('Please log in again.');return;}
+  if(window.ruRole!==roleId){alert('Your role has changed since this page loaded — please refresh and try again.');return;}
+  try{
+    await upsertRoleVerificationRequest(db,user.id,roleId,window.ruRoleInfo||{});
+    if(typeof loadMyRoleVerification==='function')await loadMyRoleVerification();
+    render();
+    alert('Submitted for verification. An admin will review it.');
+  }catch(e){
+    console.log('submitRoleForVerification error:',e&&e.message);
+    alert('Could not submit. Please try again.');
+  }
 }
 
 async function clearRole(){
@@ -4870,21 +4966,20 @@ function renderCreatorProfile(){
           ];
           return roles.map(u=>{
             const active=myRole===u.id;
-            // Verification gate (2026-10-01): show the real status of the
-            // user's own latest request for THIS role, if their current role
-            // matches it. state.myRoleVerification is loaded directly from
-            // role_verification_requests (RLS: a user always sees their own
-            // rows), so this reflects real approval state, not a guess.
+            // Verification gate (2026-10-01, extended 2026-10-02 Fix 1/Fix 4
+            // via myRoleVerificationStatus()): show the real status of the
+            // user's OWN requests for THIS role — including the "genuinely
+            // no row at all" case, which gets a CTA instead of a bare
+            // "Pending verification" label that would falsely imply one
+            // already exists (Fix 1). state.myRoleVerifications is loaded
+            // from role_verification_requests (RLS: a user always sees their
+            // own rows), so this reflects real approval state, not a guess.
             let verifBadge=active?'<span style="font-size:9px;color:'+u.color+';font-weight:600">● Self-listed</span>':'';
+            let verifCta='';
             if(active){
-              const mv=state.myRoleVerification;
-              if(mv&&mv.requested_role===u.id){
-                if(mv.status==='approved')verifBadge='<span style="font-size:9px;color:var(--green);font-weight:600">✓ Verified</span>';
-                else if(mv.status==='rejected')verifBadge='<span style="font-size:9px;color:var(--red);font-weight:600">✗ Not approved</span>';
-                else verifBadge='<span style="font-size:9px;color:var(--gold);font-weight:600">⏳ Pending verification</span>';
-              }else{
-                verifBadge='<span style="font-size:9px;color:var(--gold);font-weight:600">⏳ Pending verification</span>';
-              }
+              const vs=myRoleVerificationStatus(u.id);
+              verifBadge=vs.badge;
+              if(vs.ctaLabel)verifCta=`<button onclick="submitRoleForVerification('${u.id}')" style="background:transparent;border:1px solid var(--gold);color:var(--gold);padding:5px 10px;border-radius:10px;font-size:10px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:6px">${vs.ctaLabel}</button>`;
             }
             return `
             <div style="background:${u.bg};border:1px solid ${active?u.color:u.border};border-radius:var(--r);padding:11px 14px">
@@ -4897,6 +4992,7 @@ function renderCreatorProfile(){
                 <button onclick="openRoleForm('${u.id}')" style="background:${active?'transparent':u.color};color:${active?u.color:'#fff'};border:${active?'1px solid '+u.color:'none'};padding:5px 12px;border-radius:10px;font-size:10px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">${active?'Edit':'List as '+u.label.split(' ')[0]}</button>
               </div>
               <div style="font-size:11px;color:var(--mid);line-height:1.3">${u.tagline}</div>
+              ${verifCta}
             </div>`;
           }).join('');
         })()}
@@ -5165,15 +5261,15 @@ function renderProfileDetail(){
   // — same data loaded for the "My Role" section on the profile tab.
   const roleVisible=isMe||!!p.role_verified;
   let roleStatusBadge='<span style="font-size:9px;color:var(--mid)">● self-listed</span>';
-  if(isMe){
-    const mv=state.myRoleVerification;
-    if(mv&&mv.requested_role===p.role){
-      if(mv.status==='approved')roleStatusBadge='<span style="font-size:9px;color:var(--green);font-weight:600">✓ Verified</span>';
-      else if(mv.status==='rejected')roleStatusBadge='<span style="font-size:9px;color:var(--red);font-weight:600">✗ Not approved</span>';
-      else roleStatusBadge='<span style="font-size:9px;color:var(--gold);font-weight:600">⏳ Pending verification</span>';
-    }else{
-      roleStatusBadge='<span style="font-size:9px;color:var(--gold);font-weight:600">⏳ Pending verification</span>';
-    }
+  let roleStatusCta='';
+  // Fix 1/Fix 4 (2026-10-02): same myRoleVerificationStatus() used on the
+  // profile tab's "My Role" section, so these two screens never disagree —
+  // see that function for why "no row at all" gets a CTA instead of a bare
+  // "Pending verification" label.
+  if(isMe&&p.role){
+    const vs=myRoleVerificationStatus(p.role);
+    roleStatusBadge=vs.badge;
+    if(vs.ctaLabel)roleStatusCta=`<div style="margin-top:8px"><button onclick="submitRoleForVerification('${p.role}')" style="background:transparent;border:1px solid var(--gold);color:var(--gold);padding:6px 14px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">${vs.ctaLabel}</button></div>`;
   }
 
   // Role detail rows — only computed (and shown) when the role is actually
@@ -5202,6 +5298,7 @@ function renderProfileDetail(){
         <div style="font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:1px;color:var(--white);line-height:1">${name}</div>
         ${p.username?`<div style="font-size:12px;color:var(--mid);margin-top:2px">@${p.username}</div>`:''}
         ${roleLabel&&roleVisible?`<div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:var(--dark3);padding:4px 12px;border-radius:12px"><span style="font-size:11px;font-weight:600;color:${roleColor};text-transform:uppercase;letter-spacing:.5px">${roleLabel}</span>${roleStatusBadge}</div>`:''}
+        ${roleLabel&&roleVisible?roleStatusCta:''}
         ${p.role==='fighter'&&info.gym&&roleVisible?`<div style="font-size:12px;color:var(--lighter);margin-top:8px">🥊 ${escapeHtml(info.gym)}</div>`:''}
 
         <div style="display:flex;justify-content:center;gap:28px;margin-top:16px">
@@ -7350,24 +7447,47 @@ function checkSafeSportStatus(userId){
    requireVerified() / openVerifyForm() system is UNTOUCHED below — that's a
    separate, unrelated legacy fighter-credential gate (claim_fight,
    claim_official, publish, create_fighter_card) still driven by demo data,
-   out of scope for this task. */
+   out of scope for this task.
+
+   FOLLOW-UP (2026-10-02, PR review on #45): this section was edited again
+   for three fixes, each tagged inline below:
+     Fix 1 (Issue A) — also surfaces profiles with a role set but ZERO
+       role_verification_requests rows at all ("Never Submitted for Review"),
+       the grandfathered backlog from decision #2, previously invisible here.
+     Fix 2 (Issue B) — no change needed in THIS section; the dedupe fix lives
+       in saveRole()/upsertRoleVerificationRequest() so duplicate pending
+       rows are never created in the first place. The timestamp shown per
+       role-request card here is the visible proof it worked.
+     Fix 3 (Issue C) — adds Pending/Approved/Rejected tabs so a mis-tapped
+       decision is recoverable, instead of the item just vanishing. */
 async function loadAdminVerifyQueue(){
   const db=window.ruDB; if(!db)return;
   state.adminVerifyLoading=true;
   try{
-    const vq=await db.from('venues').select('id,name,city,region,owner_id,created_at').eq('status','pending').order('created_at',{ascending:true});
-    state.adminPendingVenues=vq.data||[];
-    const gq=await db.from('gyms').select('id,name,location,owner_id,created_at').eq('status','pending').order('created_at',{ascending:true});
-    state.adminPendingGyms=gq.data||[];
-    const rq=await db.from('role_verification_requests').select('id,profile_id,requested_role,role_info,created_at').eq('status','pending').order('created_at',{ascending:true});
+    // Fix 3: fetch ALL statuses (not just 'pending') so the dashboard can
+    // offer status tabs and let an admin change a decision again —
+    // admin_set_venue_status/admin_set_gym_status/admin_set_role_request_status
+    // already accept any of the three values, so no backend change needed.
+    const vq=await db.from('venues').select('id,name,city,region,owner_id,created_at,status').order('created_at',{ascending:true});
+    state.adminVenues=vq.data||[];
+    const gq=await db.from('gyms').select('id,name,location,owner_id,created_at,status').order('created_at',{ascending:true});
+    state.adminGyms=gq.data||[];
+    const rq=await db.from('role_verification_requests').select('id,profile_id,requested_role,role_info,status,created_at,updated_at').order('created_at',{ascending:true});
     const roleRows=rq.data||[];
-    const ids=[...new Set(roleRows.map(r=>r.profile_id))];
+    // Fix 1: also pull every profile that currently has a role set, so the
+    // "never submitted" bucket below can be computed — profiles whose
+    // CURRENT role has no role_verification_requests row at all, which a
+    // plain `.eq('status','pending')` query can never find (there's no row
+    // to find).
+    const pp=await db.from('profiles_public').select('id,display_name,username,role,role_info').not('role','is',null).limit(1000);
+    const roleProfiles=pp.data||[];
     let pmap={};
-    if(ids.length){
-      const pp=await db.from('profiles_public').select('id,display_name,username').in('id',ids);
-      (pp.data||[]).forEach(p=>{pmap[p.id]=p;});
-    }
-    state.adminPendingRoleRequests=roleRows.map(r=>({...r,profile:pmap[r.profile_id]||null}));
+    roleProfiles.forEach(p=>{pmap[p.id]=p;});
+    state.adminRoleRequests=roleRows.map(r=>({...r,profile:pmap[r.profile_id]||null}));
+    const haveRow=new Set(roleRows.map(r=>r.profile_id+'::'+r.requested_role));
+    state.adminNeverSubmittedRoles=roleProfiles
+      .filter(p=>!haveRow.has(p.id+'::'+p.role))
+      .map(p=>({profile_id:p.id,requested_role:p.role,role_info:p.role_info,profile:p}));
   }catch(e){console.log('loadAdminVerifyQueue error:',e&&e.message);}
   state.adminVerifyLoading=false;
   if(state.currentScreen==='admin_verify')render();
@@ -7405,13 +7525,48 @@ async function adminSetRoleRequestStatus(id,newStatus){
   }catch(e){console.log('adminSetRoleRequestStatus error:',e&&e.message);alert(e&&e.message?e.message:'Could not update role request. If this is the first time anyone has done this, the migration may not be live yet — check with Kaden.');}
 }
 
+// Fix 1 (2026-10-02): approve/reject a role that has NO role_verification_requests
+// row at all yet (the "Never Submitted for Review" bucket) — calls the new
+// admin_approve_unsubmitted_role() RPC, which synthesizes the first-ever
+// request row for this (profile, role) pair as already decided, rather than
+// requiring a request id that doesn't exist.
+async function adminApproveUnsubmittedRole(profileId,role,newStatus){
+  let note=null;
+  if(newStatus==='rejected'){
+    note=prompt('Reason for rejection (optional, stored on the request):','');
+    if(note===null)return;
+  }
+  const db=window.ruDB; if(!db)return;
+  try{
+    const {error}=await db.rpc('admin_approve_unsubmitted_role',{target_profile_id:profileId,target_role:role,new_status:newStatus,note:note});
+    if(error)throw error;
+    await loadAdminVerifyQueue();
+  }catch(e){console.log('adminApproveUnsubmittedRole error:',e&&e.message);alert(e&&e.message?e.message:'Could not update. If this is the first time anyone has done this, the migration may not be live yet — check with Kaden.');}
+}
+
+// Fix 3 (2026-10-02): switch which status bucket the dashboard shows.
+function setAdminVerifyStatusTab(tab){state.adminVerifyStatusTab=tab;render();}
+
 function renderAdminVerifyDashboard(){
   if(!window._adminVerifyLoaded){window._adminVerifyLoaded=true;setTimeout(loadAdminVerifyQueue,0);}
-  const venues=state.adminPendingVenues||[];
-  const gyms=state.adminPendingGyms||[];
-  const roleReqs=state.adminPendingRoleRequests||[];
+  const tab=state.adminVerifyStatusTab||'pending';
+  const allVenues=state.adminVenues||[];
+  const allGyms=state.adminGyms||[];
+  const allRoleReqs=state.adminRoleRequests||[];
+  const neverSubmitted=state.adminNeverSubmittedRoles||[];
+  const venues=allVenues.filter(v=>v.status===tab);
+  const gyms=allGyms.filter(g=>g.status===tab);
+  const roleReqs=allRoleReqs.filter(r=>r.status===tab);
   const approveBtn=(onclick)=>`<button style="flex:1;background:rgba(29,184,122,.1);border:1px solid rgba(29,184,122,.3);color:var(--green);font-size:12px;font-weight:600;padding:9px;border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif" onclick="${onclick}">✓ Approve</button>`;
   const rejectBtn=(onclick)=>`<button style="flex:1;background:rgba(232,37,26,.08);border:1px solid rgba(232,37,26,.2);color:var(--red);font-size:12px;font-weight:600;padding:9px;border-radius:8px;cursor:pointer;font-family:'DM Sans',sans-serif" onclick="${onclick}">✕ Reject</button>`;
+  // Visible timestamp per Fix 2 — proves a re-save updated the existing
+  // pending row in place instead of creating a new one.
+  const fmtDate=(iso)=>{if(!iso)return '';try{return new Date(iso).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});}catch(e){return '';}};
+  const tabLabel=tab.charAt(0).toUpperCase()+tab.slice(1);
+  // Fix 3: simple Pending/Approved/Rejected tabs — same three statuses the
+  // backend functions already accept, just surfaced for all of them instead
+  // of only ever querying 'pending'.
+  const tabBtn=(key,label)=>`<button onclick="setAdminVerifyStatusTab('${key}')" style="flex:1;padding:8px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;border:1px solid ${tab===key?'var(--gold)':'var(--dark4)'};background:${tab===key?'rgba(245,166,35,.12)':'transparent'};color:${tab===key?'var(--gold)':'var(--mid)'}">${label}</button>`;
   return `
     <div class="nav-bar">
       <button class="back-btn" onclick="closeAdminVerify()">‹</button>
@@ -7424,14 +7579,21 @@ function renderAdminVerifyDashboard(){
         <div style="font-size:12px;color:var(--light);margin-bottom:14px;line-height:1.5">New venues, gyms, and self-listed roles (Fighter/Coach/Official/Sponsor) are invisible to the public until approved here. Approving a venue or gym listing only confirms the listing itself should be public — it's a separate decision from certifying a gym (verified_venue) or verifying a specific space for a specific sport (verified_sports), both handled elsewhere.</div>
       </div>
 
-      ${state.adminVerifyLoading&&!venues.length&&!gyms.length&&!roleReqs.length?`<div class="empty" style="padding:30px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading queue…</div></div>`:''}
+      <div style="padding:0 18px 12px;display:flex;gap:8px">
+        ${tabBtn('pending','Pending')}
+        ${tabBtn('approved','Approved')}
+        ${tabBtn('rejected','Rejected')}
+      </div>
 
-      <div class="sec-head"><div class="sec-title" style="color:var(--gold)">Pending Venues · ${venues.length}</div></div>
+      ${state.adminVerifyLoading&&!allVenues.length&&!allGyms.length&&!allRoleReqs.length&&!neverSubmitted.length?`<div class="empty" style="padding:30px 20px"><div class="empty-icon">⏳</div><div class="empty-text">Loading queue…</div></div>`:''}
+
+      <div class="sec-head"><div class="sec-title" style="color:var(--gold)">${tabLabel} Venues · ${venues.length}</div></div>
       <div style="padding:0 18px">
-        ${venues.length===0?`<div class="empty"><div class="empty-text">No venues pending review</div></div>`:venues.map(v=>`
+        ${venues.length===0?`<div class="empty"><div class="empty-text">No ${tab} venues</div></div>`:venues.map(v=>`
           <div style="background:var(--dark2);border:1px solid rgba(245,166,35,.3);border-radius:var(--r);padding:14px;margin-bottom:10px">
             <div style="font-size:14px;font-weight:600;color:var(--white)">${escapeHtml(v.name||'Untitled venue')}</div>
-            <div style="font-size:11px;color:var(--mid);margin-bottom:10px">${escapeHtml([v.city,v.region].filter(Boolean).join(', ')||'No location given')}</div>
+            <div style="font-size:11px;color:var(--mid);margin-bottom:6px">${escapeHtml([v.city,v.region].filter(Boolean).join(', ')||'No location given')}</div>
+            <div style="font-size:10px;color:var(--mid);margin-bottom:10px">Submitted ${fmtDate(v.created_at)}</div>
             <div style="display:flex;gap:8px">
               ${approveBtn(`adminSetVenueStatus('${v.id}','approved')`)}
               ${rejectBtn(`adminSetVenueStatus('${v.id}','rejected')`)}
@@ -7439,12 +7601,13 @@ function renderAdminVerifyDashboard(){
           </div>`).join('')}
       </div>
 
-      <div class="sec-head"><div class="sec-title" style="color:var(--gold)">Pending Gyms · ${gyms.length}</div></div>
+      <div class="sec-head"><div class="sec-title" style="color:var(--gold)">${tabLabel} Gyms · ${gyms.length}</div></div>
       <div style="padding:0 18px">
-        ${gyms.length===0?`<div class="empty"><div class="empty-text">No gyms pending review</div></div>`:gyms.map(g=>`
+        ${gyms.length===0?`<div class="empty"><div class="empty-text">No ${tab} gyms</div></div>`:gyms.map(g=>`
           <div style="background:var(--dark2);border:1px solid rgba(245,166,35,.3);border-radius:var(--r);padding:14px;margin-bottom:10px">
             <div style="font-size:14px;font-weight:600;color:var(--white)">${escapeHtml(g.name||'Untitled gym')}</div>
-            <div style="font-size:11px;color:var(--mid);margin-bottom:10px">${escapeHtml(g.location||'No location given')}</div>
+            <div style="font-size:11px;color:var(--mid);margin-bottom:6px">${escapeHtml(g.location||'No location given')}</div>
+            <div style="font-size:10px;color:var(--mid);margin-bottom:10px">Submitted ${fmtDate(g.created_at)}</div>
             <div style="display:flex;gap:8px">
               ${approveBtn(`adminSetGymStatus('${g.id}','approved')`)}
               ${rejectBtn(`adminSetGymStatus('${g.id}','rejected')`)}
@@ -7452,16 +7615,21 @@ function renderAdminVerifyDashboard(){
           </div>`).join('')}
       </div>
 
-      <div class="sec-head"><div class="sec-title" style="color:var(--gold)">Pending Roles · ${roleReqs.length}</div></div>
+      <div class="sec-head"><div class="sec-title" style="color:var(--gold)">${tabLabel} Roles · ${roleReqs.length}</div></div>
       <div style="padding:0 18px">
-        ${roleReqs.length===0?`<div class="empty"><div class="empty-text">No role requests pending review</div></div>`:roleReqs.map(r=>{
+        ${roleReqs.length===0?`<div class="empty"><div class="empty-text">No ${tab} role requests</div></div>`:roleReqs.map(r=>{
           const nm=escapeHtml((r.profile&&(r.profile.display_name||r.profile.username))||'User');
           const info=r.role_info||{};
           const detail=[info.sport,info.specialty,info.type,info.brand].filter(Boolean).join(' · ');
+          // Fix 2: shows both the original submission date and, if it
+          // differs, the last-edited date — visible proof that a re-save
+          // updated this row in place instead of creating a duplicate.
+          const ts='Submitted '+fmtDate(r.created_at)+(r.updated_at&&r.updated_at!==r.created_at?' · updated '+fmtDate(r.updated_at):'');
           return `
           <div style="background:var(--dark2);border:1px solid rgba(245,166,35,.3);border-radius:var(--r);padding:14px;margin-bottom:10px">
             <div style="font-size:14px;font-weight:600;color:var(--white)">${nm}</div>
-            <div style="font-size:11px;color:var(--mid);margin-bottom:10px">Requesting: ${escapeHtml(ROLE_LABELS[r.requested_role]||r.requested_role)}${detail?' · '+escapeHtml(detail):''}</div>
+            <div style="font-size:11px;color:var(--mid);margin-bottom:6px">Requesting: ${escapeHtml(ROLE_LABELS[r.requested_role]||r.requested_role)}${detail?' · '+escapeHtml(detail):''}</div>
+            <div style="font-size:10px;color:var(--mid);margin-bottom:10px">${ts}</div>
             <div style="display:flex;gap:8px">
               ${approveBtn(`adminSetRoleRequestStatus('${r.id}','approved')`)}
               ${rejectBtn(`adminSetRoleRequestStatus('${r.id}','rejected')`)}
@@ -7469,6 +7637,29 @@ function renderAdminVerifyDashboard(){
           </div>`;
         }).join('')}
       </div>
+
+      ${tab==='pending'?`
+      <div class="sec-head"><div class="sec-title" style="color:var(--gold)">Never Submitted for Review · ${neverSubmitted.length}</div></div>
+      <div style="padding:0 18px">
+        <div style="font-size:11px;color:var(--mid);margin:-4px 0 10px;line-height:1.5">Fix 1: pre-existing self-listed roles with NO verification request on file at all — different from a genuine pending request above. Approving creates the first-ever request for this person/role, already marked approved.</div>
+        ${neverSubmitted.length===0?`<div class="empty"><div class="empty-text">None</div></div>`:neverSubmitted.map(r=>{
+          const nm=escapeHtml((r.profile&&(r.profile.display_name||r.profile.username))||'User');
+          const info=r.role_info||{};
+          const detail=[info.sport,info.specialty,info.type,info.brand].filter(Boolean).join(' · ');
+          return `
+          <div style="background:var(--dark2);border:1px solid rgba(127,119,221,.35);border-radius:var(--r);padding:14px;margin-bottom:10px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">
+              <span style="font-size:14px;font-weight:600;color:var(--white)">${nm}</span>
+              <span style="font-size:9px;color:var(--purple);font-weight:700;letter-spacing:.3px;background:rgba(127,119,221,.12);padding:2px 8px;border-radius:8px">NEVER SUBMITTED</span>
+            </div>
+            <div style="font-size:11px;color:var(--mid);margin-bottom:10px">Current role: ${escapeHtml(ROLE_LABELS[r.requested_role]||r.requested_role)}${detail?' · '+escapeHtml(detail):''}</div>
+            <div style="display:flex;gap:8px">
+              ${approveBtn(`adminApproveUnsubmittedRole('${r.profile_id}','${r.requested_role}','approved')`)}
+              ${rejectBtn(`adminApproveUnsubmittedRole('${r.profile_id}','${r.requested_role}','rejected')`)}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`:''}
       <div class="pb-safe"></div>
     </div>
   `;
