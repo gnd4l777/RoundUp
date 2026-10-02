@@ -1818,7 +1818,7 @@ async function loadGymPage(gymId){
       const ids=[...new Set(rows.map(r=>r.user_id))];
       let pmap={};
       if(ids.length){
-        const pp=await db.from('profiles_public').select('id,display_name,username,avatar_url,role_info').in('id',ids);
+        const pp=await db.from('profiles_public').select('id,display_name,username,avatar_url,public_role_info').in('id',ids);
         (pp.data||[]).forEach(p=>{pmap[p.id]=p;});
       }
       const withProf=rows.map(r=>({...r,profile:pmap[r.user_id]||null}));
@@ -2019,7 +2019,11 @@ function renderGymPage(){
           if(members.approved.length>0){
             out+=members.approved.map(m=>{
               const nm=escapeHtml((m.profile&&(m.profile.display_name||m.profile.username))||'Member');
-              const info=(m.profile&&m.profile.role_info)||{};
+              // Round 2 fix (Issue D continued, 2026-10-02): gym roster is a
+              // public, other-user-facing surface — reads the last-APPROVED
+              // snapshot (public_role_info), not live role_info, same as the
+              // directory card and other-user profile view.
+              const info=(m.profile&&m.profile.public_role_info)||{};
               const mRole=(m.profile&&m.profile.role)||'fighter';
               // Position label: their listed role; for fighters show sport/weight as detail.
               let posLabel=(ROLE_LABELS[mRole]||'Fighter');
@@ -2843,7 +2847,7 @@ function loadDirectory(){
   state.dirError=false;
   // People with a self-listed role (excluding the old 'gym' role — gyms are
   // now their own entity, loaded separately below).
-  db.from('profiles_public').select('id,display_name,username,avatar_url,role,role_info,role_verified').not('role','is',null).limit(500)
+  db.from('profiles_public').select('id,display_name,username,avatar_url,role,role_info,public_role_info,role_verified').not('role','is',null).limit(500)
     .then(function(res){
       state.directory=(res.data||[]).filter(p=>p.role!=='gym');
       state.dirLoading=false;
@@ -2900,7 +2904,12 @@ function computeDirectoryLists(){
 
 function renderDirPersonCard(p){
   const name=escapeHtml(p.display_name||p.username||'Creator');
-  const info=p.role_info||{};
+  // Round 2 fix (Issue D continued, 2026-10-02): other-user-facing surfaces
+  // show the last-APPROVED snapshot (profiles_public.public_role_info), not
+  // live role_info — a pending edit must not publish before an admin
+  // reviews it. The profile owner's own view/editing form still reads live
+  // role_info (see renderProfileDetail()).
+  const info=p.public_role_info||{};
   // Verification gate (2026-10-01): only show the specific role badge/
   // subtitle once profiles_public.role_verified is true for this profile.
   // Someone with an unverified (not-yet-admin-approved) role still shows up
@@ -5258,7 +5267,12 @@ function renderProfileDetail(){
   }
 
   const name=escapeHtml(p.display_name||p.username||'Creator');
-  const info=p.role_info||{};
+  // Round 2 fix (Issue D continued, 2026-10-02): the owner's own view of
+  // their own profile reads live role_info (so an in-progress edit shows up
+  // to them immediately, matching the editing form elsewhere) — anyone else
+  // viewing this profile reads public_role_info, the last-APPROVED snapshot,
+  // so a pending resubmission never publishes before an admin reviews it.
+  const info=isMe?(p.role_info||{}):(p.public_role_info||{});
   const roleLabel=p.role?(ROLE_LABELS[p.role]||p.role):null;
   const roleColor={fighter:'var(--red)',gym:'var(--gold)',coach:'var(--purple)',official:'var(--green)',sponsor:'var(--blue)'}[p.role]||'var(--light)';
   const reels=state.viewProfileReels||[];
@@ -5390,7 +5404,7 @@ async function loadViewProfile(id){
   const db=window.ruDB; if(!db||!id)return;
   state.viewProfileLoading=true;
   try{
-    const pr=await db.from('profiles_public').select('id,username,display_name,avatar_url,role,role_info,role_verified').eq('id',id).limit(1);
+    const pr=await db.from('profiles_public').select('id,username,display_name,avatar_url,role,role_info,public_role_info,role_verified').eq('id',id).limit(1);
     state.viewProfile=(pr.data&&pr.data[0])||null;
     state.viewProfileId=id;
     // Verification gate (2026-10-01): when viewing your own profile, also
@@ -7488,16 +7502,33 @@ async function loadAdminVerifyQueue(){
     // "never submitted" bucket below can be computed — profiles whose
     // CURRENT role has no role_verification_requests row at all, which a
     // plain `.eq('status','pending')` query can never find (there's no row
-    // to find).
-    const pp=await db.from('profiles_public').select('id,display_name,username,role,role_info').not('role','is',null).limit(1000);
+    // to find). Round 2 Fix 3 (2026-10-02): excludes the legacy 'gym' role,
+    // same as loadDirectory()'s "excluding the old 'gym' role — gyms are now
+    // their own entity" filter — admin_approve_unsubmitted_role() rejects
+    // 'gym' outright, so a role='gym' profile landing in this bucket would
+    // throw on both Approve and Reject with no way to clear it.
+    const pp=await db.from('profiles_public').select('id,display_name,username,role,role_info').not('role','is',null).neq('role','gym').limit(1000);
     const roleProfiles=pp.data||[];
-    let pmap={};
-    roleProfiles.forEach(p=>{pmap[p.id]=p;});
-    state.adminRoleRequests=roleRows.map(r=>({...r,profile:pmap[r.profile_id]||null}));
     const haveRow=new Set(roleRows.map(r=>r.profile_id+'::'+r.requested_role));
-    state.adminNeverSubmittedRoles=roleProfiles
-      .filter(p=>!haveRow.has(p.id+'::'+p.role))
-      .map(p=>({profile_id:p.id,requested_role:p.role,role_info:p.role_info,profile:p}));
+    const neverSubmitted=roleProfiles.filter(p=>!haveRow.has(p.id+'::'+p.role));
+    // Round 2 Fix 2 (2026-10-02): the submitter's name card was regressed to
+    // a targeted .in('id', ids) lookup like this, then was changed to a broad
+    // `.not('role','is',null).limit(1000)` scan — any pending/never-submitted
+    // request whose submitter has since cleared/changed their role (so they
+    // no longer match that scan) or gone inactive silently fell out of pmap,
+    // rendering 'User' instead of their real name. Fix: collect only the
+    // actual profile_ids this screen needs names for (every request row,
+    // plus every never-submitted profile) and look those up directly — small,
+    // specific set, no role filter, no row cap needed.
+    const neededIds=Array.from(new Set([...roleRows.map(r=>r.profile_id),...neverSubmitted.map(p=>p.id)]));
+    let pmap={};
+    if(neededIds.length){
+      const namesRes=await db.from('profiles_public').select('id,display_name,username,role,role_info').in('id',neededIds);
+      (namesRes.data||[]).forEach(p=>{pmap[p.id]=p;});
+    }
+    state.adminRoleRequests=roleRows.map(r=>({...r,profile:pmap[r.profile_id]||null}));
+    state.adminNeverSubmittedRoles=neverSubmitted
+      .map(p=>({profile_id:p.id,requested_role:p.role,role_info:p.role_info,profile:pmap[p.id]||p}));
   }catch(e){console.log('loadAdminVerifyQueue error:',e&&e.message);}
   state.adminVerifyLoading=false;
   if(state.currentScreen==='admin_verify')render();
