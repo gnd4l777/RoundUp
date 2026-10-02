@@ -16,10 +16,18 @@
 --     WHICHEVER FILE IS APPLIED LAST WINS for those four functions. If
 --     20261001000000 is ever applied AFTER this migration, it will silently
 --     overwrite this file's logging wrapper for those four functions (its own
---     bodies have no log_admin_action call). If that happens, just re-run
---     section 6 of this file afterward to restore the logging. The two files
---     are still kept fully separate per the explicit instruction not to
---     combine them — this is a documented ordering caveat, not a hard
+--     bodies have no log_admin_action call) — AND, specifically for
+--     admin_approve_unsubmitted_role, it will also silently reintroduce a
+--     real bug: that file's version still uses a plain `select ... into`
+--     with no `strict`/`exception when no_data_found` guard, where this
+--     file's version (section 6 below) fixed that. So applying
+--     20261001000000 last doesn't just drop logging for that one function —
+--     it un-fixes a correctness bug too. If that happens, just re-run
+--     section 6 of this file afterward to restore both the logging and the
+--     no_data_found fix. To avoid needing that manual follow-up at all,
+--     apply THIS migration (20261002000000) LAST, after 20261001000000. The
+--     two files are still kept fully separate per the explicit instruction
+--     not to combine them — this is a documented ordering caveat, not a hard
 --     dependency.
 --   - Section 6 also relies on plpgsql deferring body validation until
 --     runtime (confirmed project pattern, see LEARNINGS.md), so it is safe to
@@ -64,11 +72,15 @@
 alter table public.profiles
   add column if not exists is_owner boolean not null default false;
 
--- One-time bootstrap: Kaden's own confirmed real account UUID (verified this
--- session against .claude/settings.local.json, which records a prior
--- session's live anon-key probe against this exact id on the real profiles
--- table — not a guess). Baked into the migration itself so applying it is a
--- single step with no separate manual SQL required afterward.
+-- One-time bootstrap: Kaden's own confirmed real account UUID. Confirmed
+-- directly by Kaden earlier the same day, running the following in the
+-- Supabase SQL editor against the live database:
+--   update profiles set is_admin=true
+--   where id=(select id from auth.users where email='kadenf0108@gmail.com')
+--   returning id, is_admin;
+-- The result returned exactly this UUID with is_admin: true. Baked into the
+-- migration itself so applying it is a single step with no separate manual
+-- SQL required afterward.
 update public.profiles
   set is_owner = true, is_admin = true
   where id = 'b596390f-ec61-4bfb-9d34-4e6acf0b3dfc';
@@ -90,9 +102,14 @@ end $$;
 --    automatically extends to a column added later by ALTER TABLE), is_owner
 --    already has ZERO write privilege for authenticated/anon the instant it's
 --    added above, with no further action needed — restated explicitly below
---    anyway (same column lists as 20260925010000, so this is a no-op re-run)
---    so this migration is self-contained and a future reviewer doesn't have
---    to cross-reference that file to confirm is_owner is write-protected.
+--    anyway so this migration is self-contained and a future reviewer
+--    doesn't have to cross-reference that file to confirm is_owner is
+--    write-protected. The re-grant below includes every column previously
+--    granted across BOTH 20260925010000 (username, display_name,
+--    avatar_url, role, role_info) and 20260925020000 (is_active) — the
+--    table-level REVOKE above clears prior grants from both of those
+--    migrations, not just the first one, so both lists have to be
+--    reproduced here or a working grant silently disappears.
 --    There is deliberately NO function anywhere (in this file or any other)
 --    that can set is_owner for any client-authenticated caller — it is only
 --    ever settable by a human running SQL directly against the database,
@@ -105,7 +122,7 @@ grant insert (
 ) on public.profiles to authenticated;
 
 grant update (
-  username, display_name, avatar_url, role, role_info
+  username, display_name, avatar_url, role, role_info, is_active
 ) on public.profiles to authenticated;
 
 -- ----------------------------------------------------------------------------
@@ -233,7 +250,7 @@ begin
   -- is rejected. Re-affirming make_admin = true on someone ALREADY admin
   -- (e.g. only changing their moderator flag) is not a new grant and stays
   -- open to any admin.
-  if make_admin = true and v_target_is_admin = false and coalesce(v_caller_is_owner, false) = false then
+  if make_admin = true and coalesce(v_target_is_admin, false) = false and coalesce(v_caller_is_owner, false) = false then
     raise exception 'Only the owner can grant admin access.';
   end if;
 
@@ -244,7 +261,7 @@ begin
   -- it's always excluded before this point.)
   if make_admin = false then
     select count(*) into admin_count from public.profiles where is_admin = true;
-    if admin_count <= 1 and v_target_is_admin then
+    if admin_count <= 1 and coalesce(v_target_is_admin, false) then
       raise exception 'Cannot remove admin from the last remaining admin account.';
     end if;
   end if;

@@ -10455,9 +10455,14 @@ async function updateReportStatus(reportId,status){
    admin function (set_user_role, set_venue_verification,
    set_venue_space_verification, set_venue_status, set_gym_status,
    set_role_request_status, approve_unsubmitted_role, resolve_report).
-   RLS on admin_audit_log restricts real read access to admin/owner
-   accounts only — moderators do not see this screen's entry point
-   (gated by window.ruIsAdmin || window.ruIsOwner where this is opened).
+   The real gate here is server-side, not client-side: RLS on
+   admin_audit_log restricts SELECT to admin/owner accounts only, and
+   admin_list_team_roster() (used elsewhere on this screen) has its own
+   admin-or-owner check before returning any row. The admin modal this
+   screen is opened from unlocks via the existing hardcoded passphrase, not
+   a window.ruIsAdmin/window.ruIsOwner check — so a non-admin who reaches
+   this screen anyway just gets a "could not load" error from the RLS
+   denial, never real data.
    ══════════════════════════════════════════════════════════════ */
 function openActivityLog(){
   document.getElementById('activityLogModal').classList.add('show');
