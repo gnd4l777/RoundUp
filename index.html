@@ -3766,10 +3766,9 @@ function renderBoutCardCard(e,mine){
   const typeLabel=BOUT_CARD_TYPE_LABELS[e.card_type]||'Amateur';
   const when=e.event_date?new Date(e.event_date+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}):'Date TBD';
   // Completed cards (status transition that nothing in the app triggers yet,
-  // but events_bouts_public can still surface one — e.g. a card that slips
-  // through filterUpcoming via a bad date) get a muted "Completed" badge
-  // instead of the live gold one, so they're never visually mistaken for an
-  // upcoming card.
+  // but events_bouts_public can still surface one since the query itself has
+  // no date floor) get a muted "Completed" badge instead of the live gold
+  // one, so they're never visually mistaken for an upcoming card.
   const badge=(mine&&e.status==='draft')
     ?`<span style="font-size:9px;font-weight:600;padding:2px 8px;border-radius:8px;background:rgba(168,168,168,.15);color:var(--mid);text-transform:uppercase;flex-shrink:0">Draft</span>`
     :(e.status==='completed')
@@ -9097,8 +9096,23 @@ function escapeHtml(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 // slicing to a display limit. Does not touch the underlying query/state.
 function filterUpcoming(list,dateField){
   const now=Date.now();
+  const dateOnlyRe=/^\d{4}-\d{2}-\d{2}$/;
+  // Bare `date` columns (e.g. event_date) serialize as "YYYY-MM-DD" with no
+  // time/offset. new Date() on that string parses as UTC midnight, which for
+  // any negative-UTC-offset user reads today's event as "in the past" for
+  // the first several hours of the day. Force local-midnight parsing and
+  // compare against the start of today (not the exact instant) so a
+  // same-day event stays visible all day. Full timestamps (e.g. start_time,
+  // a timestamptz) already carry an explicit offset and are compared against
+  // the exact current instant as before.
+  const startOfToday=new Date(new Date(now).getFullYear(),new Date(now).getMonth(),new Date(now).getDate()).getTime();
   return (list||[]).filter(function(item){
-    const d=new Date(item&&item[dateField]);
+    const raw=item&&item[dateField];
+    if(typeof raw==='string'&&dateOnlyRe.test(raw)){
+      const d=new Date(raw+'T00:00:00');
+      return !isNaN(d)&&d.getTime()>=startOfToday;
+    }
+    const d=new Date(raw);
     return !isNaN(d)&&d.getTime()>=now;
   });
 }
