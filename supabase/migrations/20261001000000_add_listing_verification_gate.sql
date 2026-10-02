@@ -5,11 +5,15 @@
 -- any automated tool.
 --
 -- ORDERING: must be applied AFTER 20260911000000_add_venue_rental_schema.sql
--- (this migration alters the `venues` table that file creates) and AFTER
+-- (this migration alters the `venues` table that file creates), AFTER
 -- 20260925010000_add_moderator_role_and_admin_management.sql (this migration
 -- relies on profiles.is_admin, which predates that file, but also assumes the
--- moderator/admin split it establishes is already live). If venues doesn't
--- exist yet, section 1 below fails with "relation does not exist".
+-- moderator/admin split it establishes is already live), and AFTER
+-- 20260925020000_add_account_deactivation.sql (this migration's
+-- profiles_public redefinition in section 4 must preserve that migration's
+-- `where is_active` filter — see the note on section 4 below; profiles.is_active
+-- must already exist or that filter breaks). If venues doesn't exist yet,
+-- section 1 below fails with "relation does not exist".
 --
 -- ⚠️⚠️ APPLYING THIS MIGRATION WITHOUT THE MATCHING index.html CHANGE BREAKS
 -- REAL FUNCTIONALITY FOR EVERY USER — same severity class as the 2026-09-10
@@ -425,6 +429,16 @@ $$;
 --    re-submitting correctly resets visibility to unverified until the new
 --    request clears, per the design doc.
 --
+--    ⚠️ MUST ALSO PRESERVE `where is_active` — this view's definition was
+--    already updated once since 20260906010000, by 20260925020000 (account
+--    deactivation), which added a `where is_active` filter so a deactivated
+--    account disappears from the directory/gym rosters/DM pickers. A plain
+--    `drop view ... create view ...` that copies the ORIGINAL 20260906010000
+--    body without also carrying that filter forward would silently undo the
+--    deactivation fix the moment this migration applies — the account
+--    reappears everywhere, with no error anywhere. The select below includes
+--    `where p.is_active` for exactly this reason; do not drop it.
+--
 --    ⚠️ SECURITY DEFINER BY DESIGN — DO NOT ADD security_invoker = true, for
 --    the exact reason documented in 20260906010000: profiles' only SELECT
 --    policy is owner-only, so an invoker-rights view would silently return
@@ -432,6 +446,16 @@ $$;
 --    recreating the view also resets its grants, which is why the explicit
 --    GRANT SELECT is restated below (same as the original migration did).
 -- ----------------------------------------------------------------------------
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'is_active'
+  ) then
+    raise exception 'public.profiles.is_active does not exist — apply 20260925020000_add_account_deactivation.sql first, or this view redefinition will silently drop the deactivation filter.';
+  end if;
+end $$;
+
 drop view if exists public.profiles_public;
 create view public.profiles_public as
 select
@@ -448,7 +472,8 @@ select
     order by rvr.created_at desc
     limit 1
   ), false) as role_verified
-from public.profiles p;
+from public.profiles p
+where p.is_active;
 
 grant select on public.profiles_public to anon, authenticated;
 
