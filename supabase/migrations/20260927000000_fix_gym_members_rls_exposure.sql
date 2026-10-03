@@ -49,9 +49,41 @@
 --     AND new coverage, not just tightening an existing gap.
 -- ============================================================================
 
+-- 2026-10-03 UPDATE: this file was drafted 2026-09-27 assuming gym_members
+-- had ZERO existing policies (confirmed true at the time). By the time Kaden
+-- actually ran it, the live table already had four differently-named
+-- policies (gym_members_select, gym_members_insert_self,
+-- gym_members_update_owner, gym_members_delete_self_or_owner) — added by
+-- someone/something between then and now, outside this migration's
+-- knowledge. The hardcoded drop-by-expected-name statements below missed
+-- them entirely, and the post-condition check correctly caught the mismatch
+-- and aborted the whole script (same atomic-rollback behavior documented in
+-- LEARNINGS.md for the 2026-09-26 messages-policy-drift incident — nothing
+-- partial was applied). Live-probed 2026-10-03: the anon read leak is still
+-- open regardless of whatever those four unknown policies actually do,
+-- which means either RLS still isn't enabled, or at least one of them is
+-- too permissive (permissive policies are OR'd — a single bad one defeats
+-- every correct one alongside it). Rather than guess their exact shape,
+-- this version drops EVERY existing policy on the table by its real name
+-- (dynamic lookup, the established pattern for exactly this kind of drift —
+-- see LEARNINGS.md: "even a policy this project itself created... always
+-- use the dynamic lookup-and-drop-by-real-name pattern") before creating
+-- the correct four fresh. This is safe regardless of what's currently
+-- there, including re-running this migration a second time.
+
 alter table public.gym_members enable row level security;
 
-drop policy if exists "gym_members_select_approved_own_or_owner" on public.gym_members;
+do $$
+declare r record;
+begin
+  for r in
+    select policyname from pg_policies
+    where schemaname = 'public' and tablename = 'gym_members'
+  loop
+    execute format('drop policy if exists %I on public.gym_members', r.policyname);
+  end loop;
+end $$;
+
 create policy "gym_members_select_approved_own_or_owner"
   on public.gym_members for select
   using (
@@ -60,7 +92,6 @@ create policy "gym_members_select_approved_own_or_owner"
     or exists (select 1 from public.gyms g where g.id = gym_id and g.owner_id = auth.uid())
   );
 
-drop policy if exists "gym_members_insert_own_pending" on public.gym_members;
 create policy "gym_members_insert_own_pending"
   on public.gym_members for insert
   with check (
@@ -68,13 +99,11 @@ create policy "gym_members_insert_own_pending"
     and status = 'pending'
   );
 
-drop policy if exists "gym_members_update_owner_only" on public.gym_members;
 create policy "gym_members_update_owner_only"
   on public.gym_members for update
   using (exists (select 1 from public.gyms g where g.id = gym_id and g.owner_id = auth.uid()))
   with check (exists (select 1 from public.gyms g where g.id = gym_id and g.owner_id = auth.uid()));
 
-drop policy if exists "gym_members_delete_own_or_owner" on public.gym_members;
 create policy "gym_members_delete_own_or_owner"
   on public.gym_members for delete
   using (
@@ -82,9 +111,11 @@ create policy "gym_members_delete_own_or_owner"
     or exists (select 1 from public.gyms g where g.id = gym_id and g.owner_id = auth.uid())
   );
 
--- Post-condition: confirm no permissive policy slipped through with a
--- different name/shape than intended (same style of check this project's
--- other RLS migrations use).
+-- Post-condition: confirm the table ends up with EXACTLY these four
+-- policies and nothing else — since everything was just dropped by real
+-- name above, this should now always pass; it remains as a safety net in
+-- case something creates a new policy concurrently between the drop loop
+-- and here.
 do $$
 declare leftover text;
 begin
