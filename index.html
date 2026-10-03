@@ -666,12 +666,21 @@ button:active,[onclick]:active{opacity:.7;}
     </div>
     <div class="admin-section">
       <div class="admin-section-title">Team & roles</div>
-      <div style="font-size:10px;color:var(--mid);margin-bottom:8px;line-height:1.5">Look up a teammate by username and set their access. Moderator can resolve reports and delete abusive content. Admin can additionally verify venue spaces, certify gyms, and manage other people's roles.</div>
+      <div style="font-size:10px;color:var(--mid);margin-bottom:8px;line-height:1.5">Everyone with elevated access today:</div>
+      <div id="teamRosterList" style="margin-bottom:12px;display:flex;flex-direction:column;gap:6px">Loading…</div>
+      <div style="font-size:10px;color:var(--mid);margin-bottom:8px;line-height:1.5">Look up a teammate by username and set their access. Moderator can resolve reports and delete abusive content. Admin can additionally verify venue spaces, certify gyms, and manage other people's roles. Only the owner can grant NEW admin access.</div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
         <input id="teamRoleUsernameInput" placeholder="username" style="flex:1;background:var(--dark3);border:1px solid var(--dark4);border-radius:8px;padding:8px 12px;color:var(--white);font-size:12px;font-family:'DM Sans',sans-serif">
         <button class="admin-action" onclick="lookupUserForRole()">Find</button>
       </div>
       <div id="teamRoleResult" style="font-size:11px;color:var(--mid)"></div>
+    </div>
+    <div class="admin-section">
+      <div class="admin-section-title">Activity log</div>
+      <div style="font-size:10px;color:var(--mid);margin-bottom:8px;line-height:1.5">Every admin/moderator action taken by anyone on the team — who did what, when. Visible to admins and the owner only.</div>
+      <div class="admin-btn-row">
+        <button class="admin-action" onclick="closeAdmin();openActivityLog()" style="background:rgba(42,127,232,.08);border-color:rgba(42,127,232,.3);color:#2A7FE8;font-weight:600;flex:1">📋 View Activity Log</button>
+      </div>
     </div>
     <div class="admin-section">
       <div class="admin-section-title">v2.0 Final — Compliance audit applied</div>
@@ -707,6 +716,16 @@ button:active,[onclick]:active{opacity:.7;}
     <div class="modal-sub">Visible to admins and moderators only</div>
     <div id="reportsQueueList" style="display:flex;flex-direction:column;gap:10px;margin-top:10px">Loading…</div>
     <button class="admin-action" onclick="closeReportsQueue()" style="width:100%;background:var(--red);color:#fff;border-color:var(--red);font-weight:600;margin-top:14px">Close</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="activityLogModal" onclick="if(event.target===this)closeActivityLog()">
+  <div class="modal" style="max-height:88vh;overflow-y:auto">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Activity Log</div>
+    <div class="modal-sub">Visible to admins and the owner only · most recent 200</div>
+    <div id="activityLogList" style="display:flex;flex-direction:column;gap:10px;margin-top:10px">Loading…</div>
+    <button class="admin-action" onclick="closeActivityLog()" style="width:100%;background:var(--red);color:#fff;border-color:var(--red);font-weight:600;margin-top:14px">Close</button>
   </div>
 </div>
 
@@ -10360,7 +10379,7 @@ function openPreEventDisclosureForCard(eid){
   if(firstUnacked){openPreEventDisclosure(eid,firstUnacked);}
   else{alert('All confirmed fighters have acknowledged their pre-event financial disclosure for this card.');}
 }
-function openAdmin(){document.getElementById('adminModal').classList.add('show');}
+function openAdmin(){document.getElementById('adminModal').classList.add('show');loadTeamRoster();}
 function closeAdmin(){document.getElementById('adminModal').classList.remove('show');}
 
 /* ══════════════════════════════════════════════════════════════
@@ -10417,12 +10436,80 @@ async function loadReportsQueue(){
 async function updateReportStatus(reportId,status){
   const db=window.ruDB; if(!db)return;
   try{
-    const {error}=await db.from('content_reports').update({status}).eq('id',reportId);
+    // Routed through admin_resolve_report() (SECURITY DEFINER) instead of a
+    // raw client UPDATE — this is also the one write path to
+    // content_reports.status now that the direct column grant has been
+    // revoked, and it logs the action to admin_audit_log.
+    const {error}=await db.rpc('admin_resolve_report',{report_id:reportId,new_status:status});
     if(error)throw error;
     loadReportsQueue();
   }catch(e){
     console.log('updateReportStatus error:',e&&e.message);
     alert(e&&e.message?e.message:'Could not update report. Please try again.');
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ACTIVITY LOG (admin + owner only). Shows every row in
+   admin_audit_log, written server-side from inside every privileged
+   admin function (set_user_role, set_venue_verification,
+   set_venue_space_verification, set_venue_status, set_gym_status,
+   set_role_request_status, approve_unsubmitted_role, resolve_report).
+   The real gate here is server-side, not client-side: RLS on
+   admin_audit_log restricts SELECT to admin/owner accounts only, and
+   admin_list_team_roster() (used elsewhere on this screen) has its own
+   admin-or-owner check before returning any row. The admin modal this
+   screen is opened from unlocks via the existing hardcoded passphrase, not
+   a window.ruIsAdmin/window.ruIsOwner check — so a non-admin who reaches
+   this screen anyway just gets a "could not load" error from the RLS
+   denial, never real data.
+   ══════════════════════════════════════════════════════════════ */
+function openActivityLog(){
+  document.getElementById('activityLogModal').classList.add('show');
+  loadActivityLog();
+}
+function closeActivityLog(){document.getElementById('activityLogModal').classList.remove('show');}
+function renderActivityLogDetails(details){
+  if(!details||typeof details!=='object')return '';
+  try{
+    return Object.entries(details).map(([k,v])=>escapeHtml(k)+': '+escapeHtml(typeof v==='object'?JSON.stringify(v):String(v))).join(' · ');
+  }catch(e){return '';}
+}
+async function loadActivityLog(){
+  const db=window.ruDB; const listEl=document.getElementById('activityLogList');
+  if(!db||!listEl)return;
+  listEl.innerHTML='Loading…';
+  try{
+    const {data,error}=await db.from('admin_audit_log')
+      .select('id,actor_id,action,target_type,target_id,details,created_at')
+      .order('created_at',{ascending:false})
+      .limit(200);
+    if(error)throw error;
+    const rows=data||[];
+    if(!rows.length){listEl.innerHTML='<div style="font-size:12px;color:var(--mid);text-align:center;padding:20px 0">No activity logged yet.</div>';return;}
+    // Look up actor display names in one batch via profiles_public (public
+    // view, safe to query for other users) rather than N separate calls.
+    const actorIds=[...new Set(rows.map(r=>r.actor_id).filter(Boolean))];
+    let names={};
+    if(actorIds.length){
+      try{
+        const {data:actors}=await db.from('profiles_public').select('id,display_name,username').in('id',actorIds);
+        (actors||[]).forEach(a=>{names[a.id]=a.display_name||a.username||a.id;});
+      }catch(e){console.log('activity log actor lookup error:',e&&e.message);}
+    }
+    listEl.innerHTML=rows.map(r=>`
+      <div style="background:var(--dark2);border:1px solid var(--dark3);border-radius:8px;padding:12px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="font-size:13px;font-weight:600;color:var(--white)">${escapeHtml(names[r.actor_id]||'Unknown')}</div>
+          <div style="font-size:10px;color:var(--mid)">${timeAgo(r.created_at)}</div>
+        </div>
+        <div style="font-size:12px;color:var(--lighter);margin-top:4px">${escapeHtml(r.action)} <span style="color:var(--mid)">· ${escapeHtml(r.target_type)}${r.target_id?' '+escapeHtml(String(r.target_id)).slice(0,8):''}</span></div>
+        ${r.details?`<div style="font-size:11px;color:var(--mid);margin-top:6px;line-height:1.5">${renderActivityLogDetails(r.details)}</div>`:''}
+      </div>
+    `).join('');
+  }catch(e){
+    console.log('loadActivityLog error:',e&&e.message);
+    listEl.innerHTML='<div style="font-size:12px;color:var(--mid);text-align:center;padding:20px 0">Could not load activity log.</div>';
   }
 }
 
@@ -10434,6 +10521,31 @@ async function updateReportStatus(reportId,status){
    is_admin/is_moderator (SECURITY DEFINER, checks the caller is already
    an admin, guards against removing the last admin).
    ══════════════════════════════════════════════════════════════ */
+async function loadTeamRoster(){
+  const db=window.ruDB; const listEl=document.getElementById('teamRosterList');
+  if(!db||!listEl)return;
+  listEl.innerHTML='Loading…';
+  try{
+    const {data,error}=await db.rpc('admin_list_team_roster');
+    if(error)throw error;
+    const roster=data||[];
+    if(!roster.length){listEl.innerHTML='<div style="font-size:11px;color:var(--mid)">No one with elevated access found.</div>';return;}
+    listEl.innerHTML=roster.map(u=>{
+      const label=escapeHtml(u.display_name||u.username||'Unnamed');
+      const badges=[];
+      if(u.is_owner)badges.push('<span style="background:rgba(245,166,35,.15);color:var(--gold);border:1px solid rgba(245,166,35,.4);border-radius:5px;padding:2px 6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px">Owner</span>');
+      if(u.is_admin)badges.push('<span style="background:rgba(232,37,26,.1);color:var(--red);border:1px solid rgba(232,37,26,.3);border-radius:5px;padding:2px 6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px">Admin</span>');
+      if(u.is_moderator)badges.push('<span style="background:rgba(42,127,232,.1);color:#2A7FE8;border:1px solid rgba(42,127,232,.3);border-radius:5px;padding:2px 6px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px">Moderator</span>');
+      return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--dark3);border-radius:7px;padding:8px 10px">
+        <div style="font-size:12px;color:var(--white)">${label}${u.username?' <span style="color:var(--mid)">@'+escapeHtml(u.username)+'</span>':''}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">${badges.join('')}</div>
+      </div>`;
+    }).join('');
+  }catch(e){
+    console.log('loadTeamRoster error:',e&&e.message);
+    listEl.innerHTML='<div style="font-size:11px;color:var(--mid)">Could not load roster.</div>';
+  }
+}
 let _teamRoleTargetId=null;
 async function lookupUserForRole(){
   const db=window.ruDB; const resultEl=document.getElementById('teamRoleResult');
@@ -10472,8 +10584,13 @@ async function setUserRole(makeAdmin,makeModerator){
     const resultEl=document.getElementById('teamRoleResult'); if(resultEl)resultEl.innerHTML='';
     const input=document.getElementById('teamRoleUsernameInput'); if(input)input.value='';
     _teamRoleTargetId=null;
+    loadTeamRoster();
   }catch(e){
     console.log('setUserRole error:',e&&e.message);
+    // Surfaces the server-side guard messages verbatim, e.g. "Cannot modify
+    // the owner account's permissions." or "Only the owner can grant admin
+    // access." — same alert pattern already used for every other RPC error
+    // in this file.
     alert(e&&e.message?e.message:'Could not update role. Please try again.');
   }
 }
@@ -10674,7 +10791,7 @@ render();
       }catch(e){console.log('profile ensure error:',e&&e.message);}
       // Load the saved profile photo + self-listed role (if any) after refresh.
       // Fully non-fatal: any failure here just means we fall back to metadata.
-      db.from('profiles').select('display_name,avatar_url,role,role_info,is_admin,is_moderator,is_active').eq('id',res.data.user.id).limit(1).then(function(pr){
+      db.from('profiles').select('display_name,avatar_url,role,role_info,is_admin,is_moderator,is_owner,is_active').eq('id',res.data.user.id).limit(1).then(function(pr){
         var row=pr&&pr.data&&pr.data[0];
         if(row){
           // A deactivated account (self-service "Delete my account") must not
@@ -10697,6 +10814,12 @@ render();
           // delete abusive content, but never venue verification/gym
           // certification/team role management — those stay admin-only.
           window.ruIsModerator = !!row.is_moderator;
+          // Owner tier: strictly above admin, immune to being demoted by any
+          // other admin via admin_set_user_role() (enforced server-side).
+          // Gates visibility of the Activity Log + the owner badge in the
+          // Team & Roles roster — never used to grant any NEW capability
+          // client-side beyond what is_admin already grants.
+          window.ruIsOwner = !!row.is_owner;
           if(row.is_admin && typeof window.ruUnlockAdmin==='function'){window.ruUnlockAdmin(false);}
           var mtb=document.getElementById('moderatorToolsBtn');
           if(mtb && (window.ruIsAdmin || window.ruIsModerator))mtb.style.display='flex';
